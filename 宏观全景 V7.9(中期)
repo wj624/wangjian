@@ -1,0 +1,366 @@
+//@version=6
+indicator(title="宏观全景 V7.9(中期)", shorttitle="宏观全景V7.9(中期)", overlay=false, max_bars_back=5000)
+
+// ==================== 1. 参数与阈值 ====================
+group_core  = "核心判定阈值"
+group_macro = "实体通胀平滑与阈值 (抗噪音)"
+group_auto  = "自动利率基准 (10年窗口)"
+group_cgr   = "风险偏好 (铜金比)"
+group_axis  = "坐标轴保护"
+group_adv   = "进阶判定参数"
+group_ui    = "UI设置"
+
+country         = input.string("中国", "选择国家/地区", options=["中国", "美国", "日本", "欧盟"], group=group_core)
+th_rr_high      = input.float(2.5,  "流动性溢价高位阈值",         group=group_core)
+trend_sens      = input.float(0.5, "动能判定灵敏度(EMA6量级，建议0.3-1.0)", minval=0.001, group=group_core,
+     tooltip="v7.5起剪刀差动能改为EMA6(raw_scissors)，量级约±5~±20，建议设0.5")
+th_credit       = input.float(4.0,  "高收益债利差恶化阈值(%)",     group=group_core)
+
+macro_sma_len   = input.int(3, "通胀/利润数据平滑周期(月)", minval=1, group=group_macro,
+     tooltip="采用均线平滑宏观数据，滤除单月基数效应和短期噪音")
+th_ppi_up       = input.float(0.2, "平滑后PPI上行阈值(%成本推动)", group=group_macro)
+th_cpi_up       = input.float(0.1, "平滑后CPI上行阈值(%需求拉动)", group=group_macro)
+
+lookback_months = input.int(120, "回测周期 (月)", minval=12, group=group_auto)
+percent_high    = input.int(80,  "高利率分位线",                   group=group_auto)
+percent_low     = input.int(20,  "低利率分位线",                   group=group_auto)
+
+cgr_ma_len      = input.int(10,       "均线周期 (月)", group=group_cgr)
+cgr_multiplier  = input.float(10000.0, "绘图倍率",     group=group_cgr)
+
+cap_val         = input.float(40.0, "同比数值封顶", group=group_axis)
+
+// [进阶] 实际利率真假宽松过滤
+th_real_rate    = input.float(1.5, "真实宽松判定: 实际利率上限(10Y-CPI < X%)",
+     tooltip="剪刀差为正时，只有实际利率低于此值才判定为真宽松扩张，否则视为虚假繁荣", group=group_adv)
+// [进阶] 衰退深度倒挂过滤
+th_inversion    = input.float(-0.3, "衰退确认: 倒挂深度阈值(过去6个月最低利差)",
+     tooltip="只有过去6个月内出现深度倒挂（低于此值）后的修复，才确认为衰退启动，避免浅倒挂误报", group=group_adv)
+// [进阶] 滞胀压力评分阈值
+th_stagflation  = input.int(3, "滞胀预警触发分数(满分4分)",
+     tooltip="PPI高位+传导不畅+M2下行+曲线倒挂，各1分，达到此分数触发滞胀预警", group=group_adv,
+     minval=1, maxval=4)
+// [进阶] M1环比平滑周期
+m1_mom_ma_len   = input.int(3, "M1环比平滑周期(月)",
+     tooltip="M1月度环比的SMA平滑，用于识别货币活化拐点，领先M1同比约6个月", group=group_adv,
+     minval=1)
+
+f_sz_in         = input.string("small", "字体大小", options=["tiny", "small", "normal"], group=group_ui)
+
+// ==================== 2. 数据符号映射 ====================
+y2_s    = (country == "中国" ? "TVC:CN02Y"          : country == "美国" ? "TVC:US02Y"          : country == "日本" ? "TVC:JP02Y"          : "TVC:EU02Y")
+y10_s   = (country == "中国" ? "TVC:CN10Y"          : country == "美国" ? "TVC:US10Y"          : country == "日本" ? "TVC:JP10Y"          : "TVC:EU10Y")
+m1_s    = (country == "中国" ? "ECONOMICS:CNM1"     : country == "美国" ? "ECONOMICS:USM1"     : country == "日本" ? "ECONOMICS:JPM1"     : "ECONOMICS:EUM1")
+m2_s    = (country == "中国" ? "ECONOMICS:CNM2"     : country == "美国" ? "ECONOMICS:USM2"     : country == "日本" ? "ECONOMICS:JPM2"     : "ECONOMICS:EUM2")
+cpi_sym = (country == "中国" ? "ECONOMICS:CNIRYY"   : country == "美国" ? "ECONOMICS:USIRYY"   : country == "日本" ? "ECONOMICS:JPIRYY"   : "ECONOMICS:EUIRYY")
+ppi_sym = (country == "中国" ? "ECONOMICS:CNPPIYY"  : country == "美国" ? "ECONOMICS:USPPIYY"  : country == "日本" ? "ECONOMICS:JPPPIYY"  : "ECONOMICS:EUPPIYY")
+
+// ==================== 3. 辅助函数 ====================
+// [重要修复] 将月数转换为当前周期的真实K线数，避免日线图上出现参数失效
+get_bars(int months) =>
+    int multiplier = timeframe.ismonthly ? 1 : timeframe.isweekly ? 4 : timeframe.isdaily ? 21 : 21
+    months * multiplier
+
+// 统一数据请求封装（防重绘）
+sec(sym, expr) => request.security(sym, "1M", expr, lookahead=barmerge.lookahead_off)
+
+// 分位数排名函数
+calc_manual_rank(src, len) =>
+    float count_below = 0.0
+    for i = 1 to len
+        if src[i] < src
+            count_below += 1.0
+    (count_below / len) * 100.0
+
+// 封顶保护函数
+cap(v) => math.max(-cap_val, math.min(cap_val, v))
+
+// ==================== 4. 数据请求 ====================
+m1  = sec(m1_s,  close[1])
+m2  = sec(m2_s,  close[1])
+y10 = sec(y10_s, close[1])
+y2  = sec(y2_s,  close[1])
+credit_spread = sec("FRED:BAMLH0A0HYM2", close[1])
+rate_rank     = sec(y2_s, calc_manual_rank(close[1], lookback_months))   // 保持月数
+rate_avg      = sec(y2_s, ta.sma(close[1], lookback_months))            // 保持月数
+
+// 历史期数据
+m1_p  = sec(m1_s,  close[13])   // 13个月前（用于年同比）
+m2_p  = sec(m2_s,  close[13])
+m1_l  = sec(m1_s,  close[2])    // 上个月（用于月环比）
+m2_l  = sec(m2_s,  close[2])
+y10_l = sec(y10_s, close[2])
+y2_l  = sec(y2_s,  close[2])
+
+// 平滑后通胀数据
+cpi_yoy   = sec(cpi_sym, ta.sma(close[1], macro_sma_len))
+ppi_yoy   = sec(ppi_sym, ta.sma(close[1], macro_sma_len))
+cpi_yoy_p = sec(cpi_sym, ta.sma(close[2], macro_sma_len))
+ppi_yoy_p = sec(ppi_sym, ta.sma(close[2], macro_sma_len))
+
+// 铜金数据
+hg_c = sec("COMEX:HG1!", close[1])
+gc_c = sec("COMEX:GC1!", close[1])
+
+// ==================== 5. 核心指标计算 ====================
+raw_m1_yoy   = (m1 - m1_p) / m1_p * 100
+raw_m2_yoy   = (m2 - m2_p) / m2_p * 100
+raw_scissors = raw_m1_yoy - raw_m2_yoy
+
+m1_yoy   = cap(raw_m1_yoy)
+m2_yoy   = cap(raw_m2_yoy)
+scissors = cap(raw_scissors)
+
+// [修复与应用封顶] EMA计算应用 get_bars 换算，并套用 cap_val 封顶保护
+scissors_mome = cap(ta.ema(raw_scissors, get_bars(6)))
+
+cgr_ratio = hg_c / gc_c
+cgr_ma    = ta.ema(cgr_ratio, get_bars(cgr_ma_len))
+risk_on   = cgr_ratio > cgr_ma
+
+term_spread       = y10 - y2
+liquidity_premium = y10 - raw_m2_yoy
+
+cpi_mom       = cpi_yoy - nz(cpi_yoy_p)
+ppi_mom       = ppi_yoy - nz(ppi_yoy_p)
+real_rate_ppi = y10 - ppi_yoy
+real_rate_cpi = y10 - cpi_yoy
+is_real_loose = real_rate_cpi < th_real_rate
+
+m1_mom       = (m1 - m1_l) / m1_l * 100
+m1_mom_ma    = ta.sma(m1_mom, get_bars(m1_mom_ma_len))
+is_m1_turning_up = m1_mom_ma > nz(m1_mom_ma[1])
+
+inversion_depth = ta.lowest(term_spread, get_bars(6))
+
+// M2 趋势下行判断 (使用 get_bars 获取真实的3个月前状态)
+is_m2_dropping = raw_m2_yoy < nz(raw_m2_yoy[get_bars(3)])
+
+stagflation_score = (
+     (ppi_yoy > 2.0 ? 1 : 0)                       
+   + (ppi_yoy - cpi_yoy > 1.0 ? 1 : 0)             
+   + (is_m2_dropping ? 1 : 0)                      
+   + (term_spread < 0 ? 1 : 0))                     
+is_stagflation_warn = stagflation_score >= th_stagflation
+
+// ==================== 6. 判定变量 ====================
+is_rate_rel_high = rate_rank >= percent_high
+is_rate_rel_low  = rate_rank <= percent_low
+
+is_tight_crash = is_rate_rel_high and raw_scissors < 0 and credit_spread > th_credit
+is_liq_trap = is_rate_rel_low and raw_scissors > 0 and not risk_on
+
+is_recession_start = (
+     inversion_depth < th_inversion
+     and (term_spread - (y10_l - y2_l)) > 0.1
+     and raw_scissors < 0)
+
+is_tightening_end = (
+     not is_recession_start
+     and liquidity_premium > th_rr_high
+     and scissors_mome > 0)
+
+is_expansion = (
+     not is_recession_start
+     and not is_tightening_end
+     and raw_scissors > 0
+     and risk_on
+     and is_real_loose)
+
+is_bubble = (
+     not is_recession_start
+     and not is_tightening_end
+     and raw_scissors > 0
+     and not risk_on)
+
+is_structure = (
+     not is_recession_start
+     and not is_tightening_end
+     and raw_scissors < 0
+     and risk_on)
+
+is_slump = (
+     not is_recession_start
+     and not is_tightening_end
+     and raw_scissors < 0
+     and not risk_on)
+
+is_neutral = not (is_recession_start or is_tightening_end or is_expansion
+                  or is_bubble or is_structure or is_slump)
+
+// ==================== 7. 背景渲染 ====================
+// 背景代码维持您的原生中文逻辑
+bgcolor(is_tight_crash ? color.new(#ff0000, 45) : na, title="背景: 🚨主动紧缩崩盘 - 判定逻辑：2年债处于10年高位且 M1-M2 剪刀差为负，叠加高收益债信用利差急剧走阔（> 阈值），暗示高息环境与系统性流动性枯竭共存，属于典型的流动性自杀式暴跌阶段")
+bgcolor(not is_tight_crash and is_liq_trap ? color.new(#000080, 60) : na, title="背景: 🕸流动性陷阱- 判定逻辑：利率处于10年极低分位（Rank < 20%），剪刀差虽然转正但铜金比显示处于避险状态（Risk Off），说明钱虽然多但由于心态恐慌无法进入风险资产，警惕资产价格长期阴跌")
+bgcolor(not is_tight_crash and not is_liq_trap and is_recession_start ? color.new(#ff5252, 70) : na, title="背景: ☠衰退确认- 判定逻辑：前期利差深度倒挂（< -0.1%）且当前利差开始出现 > 0.1% 的剧烈陡峭化修复，伴随剪刀差仍为负值。这预示着经济基本面正式进入失速衰退，是杀估值到杀业绩的转折点")
+bgcolor(not is_tight_crash and not is_liq_trap and is_tightening_end ? color.new(color.rgb(0, 230, 118), 85) : na, title="背景: ⚡筑底复苏『黄金坑』 - 判定逻辑：不满足衰退特征，且流动性溢价（10Y-M2YoY）处于高位（> 2.5%），剪刀差动能（EMA6）开始转正回升。说明政策底已现，活钱开始回流，是极佳的逆向配置机会")
+bgcolor(not is_tight_crash and not is_liq_trap and is_expansion ? color.new(color.lime, 90) : na, title="背景: ★全面扩张 - 判定逻辑：剪刀差为正值（Raw_Scissors > 0），市场上活钱充沛，且铜金比站稳均线上方（Risk_On）。说明宏观需求与风险偏好共振，大宗商品与权益类资产进入普涨螺旋")
+bgcolor(not is_tight_crash and not is_liq_trap and is_bubble ? color.new(#ff9900, 79) : na, title="背景: ⚠警惕回撤- 判定逻辑：剪刀差虽为正，但铜金比掉下均线（Risk_Off）。说明流动性虽好，但避险情绪开始抬头，可能存在基本面无法支撑估值的情况，需防范虚假繁荣后的急跌")
+bgcolor(not is_tight_crash and not is_liq_trap and is_structure ? color.new(color.aqua, 90) : na, title="背景: ☯结构行情- 判定逻辑：剪刀差为负，总体流动性偏紧，但铜金比却在回升（Risk_On）。这属于典型的存量博弈，只有具备强逻辑的特定板块（结构性牛市）能跑赢大盘")
+bgcolor(not is_tight_crash and not is_liq_trap and is_slump ? color.new(#fd6601, 60) : na, title="背景: ❄熊市收缩 - 判定逻辑：剪刀差为负且处于避险心态（Risk_Off）。钱在收缩且人心涣散，市场缺乏赚钱效应，属于极度避险的现金防御期")
+bgcolor(not is_tight_crash and not is_liq_trap and is_neutral ? color.new(color.yellow, 95) : na, title="背景: ⚑中性博弈 - 判定逻辑：上述极端信号均未触发，市场处于宏观真空期或震荡过渡阶段")
+bgcolor(is_stagflation_warn ? color.new(#8b0000, 75) : na, title="背景叠加: 🌡滞胀压力")
+
+// ==================== 8. 通胀类型判定 ====================
+string inflation_type = ""
+if ppi_mom > th_ppi_up and cpi_mom < th_cpi_up
+    inflation_type := "成本推动型"
+else if cpi_mom > th_cpi_up and ppi_yoy >= 0
+    inflation_type := "需求拉动型"
+else if ppi_yoy < 0 and cpi_yoy < 1
+    inflation_type := "通缩压力型"
+else
+    inflation_type := "结构均衡型"
+
+string diag_status = ""
+if inflation_type == "成本推动型"
+    diag_status := "成本挤压，成本快速上升"
+else if inflation_type == "需求拉动型"
+    diag_status := "量价齐升，需求拉动"
+else if inflation_type == "通缩压力型"
+    diag_status := "盈利枯竭，PPI转负"
+else if (ppi_yoy - cpi_yoy) > (ppi_yoy_p - cpi_yoy_p)
+    diag_status := "边际修复PPI-CPI剪刀差比上期扩大（修复）"
+else
+    diag_status := "震荡筑底PPI-CPI剪刀差未改善"
+
+// ==================== 9. 综合宏观警报 ====================
+string ultimate_alert = "宏观平稳: 关注微观结构"
+color  alert_color    = color.white
+
+if is_tight_crash and inflation_type == "通缩压力型"
+    ultimate_alert := "🚨 通缩型去杠杆: 流动性枯竭+利润暴跌"
+    alert_color    := #ff0000
+else if is_tight_crash and inflation_type == "成本推动型"
+    ultimate_alert := "🚨 滞胀型危机: 高息+高通胀+低增长"
+    alert_color    := color.fuchsia
+else if is_liq_trap and inflation_type == "通缩压力型"
+    ultimate_alert := "🕸 资产表衰退: 钱多拒贷+实体通缩"
+    alert_color    := color.orange
+else if is_expansion and inflation_type == "需求拉动型"
+    ultimate_alert := "★ 完美风暴(向上): 真实宽松+良性通胀"
+    alert_color    := color.lime
+else if is_recession_start
+    ultimate_alert := "☠ 杀业绩开启: 深度倒挂后修复+盈利下降"
+    alert_color    := color.rgb(255, 82, 82)
+else if is_slump and inflation_type == "通缩压力型"
+    ultimate_alert := "❄ 戴维斯双杀: 估值与盈利双重收缩"
+    alert_color    := color.rgb(253, 102, 1)
+else if is_tightening_end and is_m1_turning_up
+    ultimate_alert := "⚡ 政策底+M1环比回升: 左侧布局窗口"
+    alert_color    := color.aqua
+else if is_tightening_end
+    ultimate_alert := "⚡ 政策底已现: 紧缩极点已过, 左侧机会"
+    alert_color    := color.aqua
+else if is_stagflation_warn
+    ultimate_alert := "🌡 滞胀压力: 成本侵蚀利润，规避强周期"
+    alert_color    := color.rgb(255, 165, 0)
+
+// ==================== 10. 系统状态变量 ====================
+string sys_verdict = (
+     is_tight_crash     ? "🚨 主动紧缩: 高息+枯竭, 崩盘风险" :
+     is_liq_trap        ? "🕸 流动性陷阱: 钱多拒贷, 阴跌" :
+     is_recession_start ? "☠ 衰退初期: 深倒挂修复, 杀业绩" :
+     is_tightening_end  ? "⚡ 紧缩尾声: 拐点将至(Golden Pit)" :
+     is_expansion       ? "★ 全面扩张: 真宽松+高偏好" :
+     is_bubble          ? "⚠ 虚假繁荣: 流动性佳但避险" :
+     is_structure       ? "☯ 存量博弈: 钱紧但偏好回升" :
+     is_slump           ? "❄ 极度冷冬: 恐慌避险, 现金防御" : "⚑ 趋势博弈: 信号不一")
+
+color sys_color = (
+     is_tight_crash     ? color.red :
+     is_liq_trap        ? color.orange :
+     is_recession_start ? color.rgb(255, 82, 82) :
+     is_tightening_end  ? color.rgb(0, 230, 118) :
+     is_expansion       ? color.lime :
+     is_bubble          ? color.orange :
+     is_structure       ? color.aqua :
+     is_slump           ? color.rgb(253, 102, 1) : color.yellow)
+
+string cycle_pos = (
+     is_tight_crash     ? "紧缩崩盘期" :
+     is_liq_trap        ? "低欲陷阱期" :
+     is_recession_start ? "衰退确认" :
+     is_tightening_end  ? "筑底复苏" :
+     is_expansion       ? "牛市扩张" :
+     is_bubble          ? "警惕回撤" :
+     is_structure       ? "结构行情" :
+     is_slump           ? "熊市防御" : "中性博弈")
+
+// ==================== 11. 绘图 ====================
+plot(m1_yoy,                   "M1同比",  color.green,                    2)
+plot(m2_yoy,                   "M2同比",  color.red,                      2)
+plot(scissors,                 "剪刀差",  raw_scissors >= 0 ? color.new(color.green, 70) : color.new(color.red, 70), 1, plot.style_columns)
+plot(term_spread * 10,         "利差x10", color.new(color.purple, 30),    1, plot.style_circles)
+plot(cgr_ratio * cgr_multiplier, "铜金比", color.new(#FFD700, 30),         2)
+plot(scissors_mome,            "剪刀差动能", color.new(#39ee0c, 24), 1, plot.style_line)
+hline(0, "零轴", color.gray, hline.style_dotted)
+
+// ==================== 12. 全新 6列紧凑型看板 (高度缩减) ====================
+if barstate.islast
+    // 创建 6列 x 8行 的紧凑型网格
+    var table tb = table.new(position.top_right, 6, 8, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+    f_sz = f_sz_in == "tiny" ? size.tiny : f_sz_in == "small" ? size.small : size.normal
+
+    // --- 行0：表头 ---
+    table.cell(tb, 0, 0, "区域: " + country, text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+    table.cell(tb, 1, 0, "判定评估", text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+    table.cell(tb, 2, 0, "核心数据", text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+    table.cell(tb, 3, 0, "模块/指标", text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+    table.cell(tb, 4, 0, "判定评估", text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+    table.cell(tb, 5, 0, "核心数据", text_color=color.white, text_size=f_sz, bgcolor=color.new(#1a237e, 20))
+
+    // --- 行1：左-货币环境 | 右-活化动能 ---
+    table.cell(tb, 0, 1, "货币环境", text_color=color.yellow, text_size=f_sz)
+    table.cell(tb, 1, 1, raw_scissors > 0 ? "活化(M1>M2)" : "紧缩(M1<M2)", text_color=raw_scissors > 0 ? color.lime : color.red, text_size=f_sz)
+    table.cell(tb, 2, 1, "M1: " + str.tostring(raw_m1_yoy, "#.##") + "%", text_color=color.green, text_size=f_sz)
+    table.cell(tb, 3, 1, "活化动能", text_color=color.aqua, text_size=f_sz)
+    table.cell(tb, 4, 1, math.abs(scissors_mome) < trend_sens ? "平稳（剪刀差变化小） →" : scissors_mome > 0 ? "改善（剪刀差扩大） ↑" : "减弱 （剪刀差收窄）↓", text_color=scissors_mome > 0 ? color.lime : color.red, text_size=f_sz)
+    table.cell(tb, 5, 1, "M2: " + str.tostring(raw_m2_yoy, "#.##") + "%", text_color=color.red, text_size=f_sz)
+
+    // --- 行2：左-期限利差 | 右-流动性压力 ---
+    table.cell(tb, 0, 2, "期限利差", text_color=color.fuchsia, text_size=f_sz)
+    table.cell(tb, 1, 2, term_spread < 0 ? "倒挂危险< 0" : "形态正常≥ 0", text_color=term_spread < 0 ? color.red : color.white, text_size=f_sz)
+    table.cell(tb, 2, 2, "10Y-2Y: " + str.tostring(term_spread, "#.##") + "%", text_color=color.white, text_size=f_sz)
+    table.cell(tb, 3, 2, "流动性压力", text_color=color.orange, text_size=f_sz)
+    table.cell(tb, 4, 2, liquidity_premium > th_rr_high ? "紧缩极点> 2.5" : "负担均衡≤ 2.5", text_color=color.white, text_size=f_sz)
+    table.cell(tb, 5, 2, "溢价(Y10-M2负好): " + str.tostring(liquidity_premium, "#.##") + "%", text_color=color.white, text_size=f_sz)
+
+    // --- 行3：左-风险偏好 | 右-总体趋势 ---
+    table.cell(tb, 0, 3, "风险偏好", text_color=color.rgb(255, 215, 0), text_size=f_sz)
+    table.cell(tb, 1, 3, risk_on ? "乐观追逐(均线上升)" : "避险恐惧(均线下降)", text_color=risk_on ? color.lime : color.orange, text_size=f_sz)
+    table.cell(tb, 2, 3, "铜金比: " + str.tostring(cgr_ratio * 100, "#.##"), text_color=color.yellow, text_size=f_sz)
+    table.cell(tb, 3, 3, "总体趋势", text_color=color.white, text_size=f_sz)
+    table.cell(tb, 4, 3, (raw_scissors > 0 and term_spread > 0) ? "牛市扩张期(M1-M2,10Y-2Y＞0)" : (raw_scissors < 0 and term_spread < 0) ? "萧条倒挂期(M1-M2,10Y-2Y＜0)" : "存量防御期（剪刀差和利差方向不一致）", text_color=(raw_scissors > 0 and term_spread > 0) ? color.lime : (raw_scissors < 0 and term_spread < 0) ? color.red : color.orange, text_size=f_sz)
+    table.cell(tb, 5, 3, "剪刀差(M1-M2): " + str.tostring(raw_scissors, "#.##") + "%", text_color=raw_scissors >= 0 ? color.green : color.red, text_size=f_sz)
+
+    // --- 行4：左-利率定位 | 右-实体与利润 ---
+    table.cell(tb, 0, 4, "利率定位", text_color=color.rgb(254, 254, 255), text_size=f_sz)
+    table.cell(tb, 1, 4, str.tostring(rate_rank, "0.##") + "% 分位", text_color=is_rate_rel_high ? color.red : is_rate_rel_low ? color.aqua : color.white, text_size=f_sz)
+    table.cell(tb, 2, 4, "10Y均/现: " + str.tostring(rate_avg, "#.##") + "/" + str.tostring(y2, "#.##"), text_color=color.white, text_size=f_sz)
+    table.cell(tb, 3, 4, "实体与利润", text_color=color.fuchsia, text_size=f_sz, bgcolor=color.new(#2c163a, 40))
+    table.cell(tb, 4, 4, diag_status, text_color=color.white, text_size=f_sz, bgcolor=color.new(#2c163a, 40))
+    table.cell(tb, 5, 4, "CPI/PPI: " + str.tostring(cpi_yoy, "#.##") + "/" + str.tostring(ppi_yoy, "#.##"), text_color=color.yellow, text_size=f_sz, bgcolor=color.new(#2c163a, 40))
+
+    // --- 行5：左-M1环比动能 | 右-滞胀压力 ---
+    table.cell(tb, 0, 5, "M1环比动能", text_color=color.rgb(100, 200, 255), text_size=f_sz, bgcolor=color.new(#0d2137, 40))
+    table.cell(tb, 1, 5, is_m1_turning_up ? "↑ 环比上月动能回升" : "↓ 环比上月动能走弱", text_color=is_m1_turning_up ? color.lime : color.orange, text_size=f_sz, bgcolor=color.new(#0d2137, 40))
+    table.cell(tb, 2, 5, "SMA动能: " + str.tostring(m1_mom_ma, "#.##") + "%", text_color=m1_mom_ma > 0 ? color.lime : color.red, text_size=f_sz, bgcolor=color.new(#0d2137, 40))
+    table.cell(tb, 3, 5, "滞胀压力", text_color=color.rgb(255, 160, 80), text_size=f_sz, bgcolor=color.new(#2a1000, 40))
+    table.cell(tb, 4, 5, stagflation_score >= 3 ? "预警("+str.tostring(stagflation_score)+"/4)" : stagflation_score == 2 ? "苗头" : "暂无", text_color=stagflation_score >= 3 ? color.rgb(255, 80, 80) : color.white, text_size=f_sz, bgcolor=color.new(#2a1000, 40))
+    table.cell(tb, 5, 5, "实率(Y10-CPI): " + str.tostring(real_rate_cpi, "#.##") + "%", text_color=is_real_loose ? color.lime : color.red, text_size=f_sz, bgcolor=color.new(#2a1000, 40))
+
+    // --- 行6：系统总评与定位 (横向合并，给结论充分的展示空间) ---
+    table.cell(tb, 0, 6, "系统总评", text_color=color.white, text_size=f_sz, bgcolor=color.new(color.gray, 60))
+    table.cell(tb, 1, 6, sys_verdict, text_color=sys_color, text_size=f_sz, text_halign=text.align_left, bgcolor=color.new(color.black, 20))
+    table.merge_cells(tb, 1, 6, 2, 6) // 合并第1至第2列
+    table.cell(tb, 3, 6, "周期定位", text_color=color.white, text_size=f_sz, bgcolor=color.new(color.gray, 60))
+    table.cell(tb, 4, 6, cycle_pos, text_color=sys_color, text_size=f_sz, bgcolor=color.new(color.black, 20))
+    table.merge_cells(tb, 4, 6, 5, 6) // 合并第4至第5列
+
+    // --- 行7：综合警报与债务实率 (横向合并) ---
+    table.cell(tb, 0, 7, "综合警报", text_color=color.white, text_size=f_sz, bgcolor=color.new(color.maroon, 40))
+    table.cell(tb, 1, 7, ultimate_alert, text_color=alert_color, text_size=f_sz, text_halign=text.align_left, bgcolor=color.new(color.black, 20))
+    table.merge_cells(tb, 1, 7, 3, 7) // 合并前置三列，提供极宽视野
+    table.cell(tb, 4, 7, "债务实率企业的“生死线(Y10-PPI)", text_color=color.white, text_size=f_sz, bgcolor=color.new(color.maroon, 40))
+    table.cell(tb, 5, 7, str.tostring(real_rate_ppi, "#.##") + "%", text_color=real_rate_ppi > 3 ? color.red : color.lime, text_size=f_sz, bgcolor=color.new(color.black, 20))
