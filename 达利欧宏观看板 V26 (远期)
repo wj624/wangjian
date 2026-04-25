@@ -1,0 +1,330 @@
+//@version=6
+indicator("达利欧宏观看板 V26 (远期)", shorttitle="Dalio_V26", overlay=false, max_lines_count=500, max_labels_count=500)
+
+// ==========================================
+// 1. 数据获取函数
+// ==========================================
+f_get_macro(_tic) =>
+    _raw   = request.security(_tic, "D", close, gaps=barmerge.gaps_off, ignore_invalid_symbol=true)
+    _fixed = ta.valuewhen(not na(_raw), _raw, 0)
+    _fixed
+
+// ==========================================
+// 2. 核心指标计算
+// ==========================================
+f_calc_val(_mode, _debt, _yield, _gdp) =>
+    _mode == "模式A：名义GDP增长率减去10年国债收益率，越高越好" ? (_gdp - _yield) : ((_debt / 100) * _yield)
+
+// ==========================================
+// 3. 5级严重度评分 (0=优秀 ~ 4=危机)
+// ==========================================
+f_severity(_mode, _val, _debt) =>
+    int base = 0
+    if _mode == "模式A：名义GDP增长率减去10年国债收益率，越高越好"
+        if _val > 3.0
+            base := 0
+        else if _val > 1.0
+            base := 1
+        else if _val > 0.0
+            base := 2
+        else if _val > -2.0
+            base := 3
+        else
+            base := 4
+    else
+        if _val < 1.5
+            base := 0
+        else if _val < 2.5
+            base := 1
+        else if _val < 3.5
+            base := 2
+        else if _val < 5.0
+            base := 3
+        else
+            base := 4
+    int debt_amp = _debt > 200 ? 2 : _debt > 150 ? 1 : 0
+    math.min(base + debt_amp, 4)
+
+// ==========================================
+// 4. 显示辅助函数
+// ==========================================
+
+// 5级状态文字
+f_diag_text(_sev) =>
+    _sev == 0 ? "强扩张" : _sev == 1 ? "健康" : _sev == 2 ? "中性" : _sev == 3 ? "压力" : "危机"
+
+// 5级颜色
+f_sev_col(_sev) =>
+    _sev == 0 ? color.rgb(0, 220, 150) :
+     _sev == 1 ? color.rgb(100, 220, 100) :
+     _sev == 2 ? color.rgb(220, 220, 50) :
+     _sev == 3 ? color.rgb(255, 150, 0) :
+                 color.rgb(255, 60, 60)
+
+// ---- 新增：总计利息压力 (TP) 风险判定颜色逻辑 ----
+f_tp_col(_val) =>
+    _val > 1200 ? color.rgb(255, 60, 60) :   // 红色：必然发生债务螺旋 (95% 危机)
+     _val > 800  ? color.rgb(255, 150, 0) :  // 橙色：高危风险
+     _val > 450  ? color.rgb(220, 220, 50) : // 黄色：压力增加
+     _val > 150  ? color.rgb(100, 220, 100) : // 绿色：正常健康
+                   color.rgb(0, 220, 150)     // 翠绿：极低风险
+
+// Dalio 综合视角
+f_comp_diag(_debt, _mode, _sev) =>
+    string s = ""
+    if _mode == "模式A：名义GDP增长率减去10年国债收益率，越高越好"
+        if _sev == 0
+            s := "增长远超利率\n和谐去杠杆\n扩张潜力强"
+        else if _sev == 1
+            s := "温和正利差\n债务周期健康\n可持续增长"
+        else if _sev == 2
+            s := "利差趋近于零\n债务周期中性\n警惕利率上行"
+        else if _sev == 3
+            s := "利率反超增长\n去杠杆压力期\n需政策对冲"
+        else
+            s := "严重负利差\n债务危机风险\n需强力政策干预"
+    else
+        string dlv = _debt > 200 ? "极高>200%" : _debt > 150 ? "极高" : _debt > 130 ? "高" : _debt > 100 ? "中高" : "中等"
+        if _sev == 0
+            s := "债务" + dlv + "\n利息极轻\n长期可持续"
+        else if _sev == 1
+            s := "债务" + dlv + "\n利息轻度\n健康运行"
+        else if _sev == 2
+            s := "债务" + dlv + "\n利息中等\n需保持观察"
+        else if _sev == 3
+            s := "债务" + dlv + "\n利息偏重\n债务周期后期"
+        else
+            s := "债务" + dlv + "\n利息沉重\n流动性危机风险"
+    s
+
+// ==========================================
+// 5. 颜色常量
+// ==========================================
+c_white     = color.new(#ffffff, 0)
+c_lightgray = color.new(#d1d4dc, 0)
+c_gray      = color.new(#808080, 0)
+c_orange    = color.new(#ff9800, 0)
+c_black_bg  = color.new(#000000, 30)
+c_inactive  = color.new(#555555, 0)
+
+// ==========================================
+// 6. 参数设置
+// ==========================================
+grp_logic = "核心逻辑选择"
+calc_mode = input.string(
+     "模式A：名义GDP增长率减去10年国债收益率，越高越好", "计算模式",
+     options=["模式A：名义GDP增长率减去10年国债收益率，越高越好",
+              "模式B：债务占GDP比例乘以10年国债收益率（代理利息负担），越低越好"],
+     group=grp_logic)
+view_mode = input.string(
+     "利息压力指标", "曲线显示内容",
+     options=["总债务/GDP", "利息压力指标", "总计利息压力"],
+     group=grp_logic)
+
+grp_vis = "经济体开关（同步控制评测参与）"
+show_us = input.bool(true, "🇺🇸 美国 (US)", group=grp_vis)
+show_cn = input.bool(true, "🇨🇳 中国 (CN)", group=grp_vis)
+show_jp = input.bool(true, "🇯🇵 日本 (JP)", group=grp_vis)
+show_eu = input.bool(true, "🇪🇺 欧洲 (EU)", group=grp_vis)
+
+grp_font = "字体设置"
+font_size = input.string("small", "全局字体大小", options=["tiny", "small", "normal"], group=grp_font)
+text_sz = font_size == "tiny" ? size.tiny : font_size == "small" ? size.small : size.normal
+
+// ==========================================
+// 7. 数据抓取
+// ==========================================
+us_d = f_get_macro("FRED:GFDEGDQ188S")
+us_y = f_get_macro("TVC:US10Y")
+us_g = f_get_macro("ECONOMICS:USGDPYY")
+
+cn_d = f_get_macro("ECONOMICS:CNGDG")
+cn_y = f_get_macro("TVC:CN10Y")
+cn_g = f_get_macro("ECONOMICS:CNGDPYY")
+
+jp_d = f_get_macro("ECONOMICS:JPGDG")
+jp_y = f_get_macro("TVC:JP10Y")
+jp_g = f_get_macro("ECONOMICS:JPGDPYY")
+
+eu_d = f_get_macro("ECONOMICS:EUGDG")
+eu_y = f_get_macro("TVC:DE10Y")
+eu_g = f_get_macro("ECONOMICS:EUGDPYY")
+
+res_us = f_calc_val(calc_mode, us_d, us_y, us_g)
+res_cn = f_calc_val(calc_mode, cn_d, cn_y, cn_g)
+res_jp = f_calc_val(calc_mode, jp_d, jp_y, jp_g)
+res_eu = f_calc_val(calc_mode, eu_d, eu_y, eu_g)
+
+// 总计利息压力 = 总债务/GDP * 代理利息负担
+tp_us = us_d * ((us_d / 100) * us_y)
+tp_cn = cn_d * ((cn_d / 100) * cn_y)
+tp_jp = jp_d * ((jp_d / 100) * jp_y) 
+tp_eu = eu_d * ((eu_d / 100) * eu_y)
+
+// ==========================================
+// 8. 5级严重度 & 趋势感知
+// ==========================================
+is_mode_A = calc_mode == "模式A：名义GDP增长率减去10年国债收益率，越高越好"
+
+sev_us = f_severity(calc_mode, res_us, us_d)
+sev_cn = f_severity(calc_mode, res_cn, cn_d)
+sev_jp = f_severity(calc_mode, res_jp, jp_d)
+sev_eu = f_severity(calc_mode, res_eu, eu_d)
+
+prev_us = nz(res_us[20], res_us)
+prev_cn = nz(res_cn[20], res_cn)
+prev_jp = nz(res_jp[20], res_jp)
+prev_eu = nz(res_eu[20], res_eu)
+
+trend_us = is_mode_A ? (res_us > prev_us + 0.1 ? "↑ 改善" : res_us < prev_us - 0.1 ? "↓ 恶化" : "→ 持平") : (res_us < prev_us - 0.1 ? "↑ 改善" : res_us > prev_us + 0.1 ? "↓ 恶化" : "→ 持平")
+trend_cn = is_mode_A ? (res_cn > prev_cn + 0.1 ? "↑ 改善" : res_cn < prev_cn - 0.1 ? "↓ 恶化" : "→ 持平") : (res_cn < prev_cn - 0.1 ? "↑ 改善" : res_cn > prev_cn + 0.1 ? "↓ 恶化" : "→ 持平")
+trend_jp = is_mode_A ? (res_jp > prev_jp + 0.1 ? "↑ 改善" : res_jp < prev_jp - 0.1 ? "↓ 恶化" : "→ 持平") : (res_jp < prev_jp - 0.1 ? "↑ 改善" : res_jp > prev_jp + 0.1 ? "↓ 恶化" : "→ 持平")
+trend_eu = is_mode_A ? (res_eu > prev_eu + 0.1 ? "↑ 改善" : res_eu < prev_eu - 0.1 ? "↓ 恶化" : "→ 持平") : (res_eu < prev_eu - 0.1 ? "↑ 改善" : res_eu > prev_eu + 0.1 ? "↓ 恶化" : "→ 持平")
+
+trend_col_us = trend_us == "↑ 改善" ? color.rgb(0,220,150) : trend_us == "↓ 恶化" ? color.rgb(255,60,60) : c_lightgray
+trend_col_cn = trend_cn == "↑ 改善" ? color.rgb(0,220,150) : trend_cn == "↓ 恶化" ? color.rgb(255,60,60) : c_lightgray
+trend_col_jp = trend_jp == "↑ 改善" ? color.rgb(0,220,150) : trend_jp == "↓ 恶化" ? color.rgb(255,60,60) : c_lightgray
+trend_col_eu = trend_eu == "↑ 改善" ? color.rgb(0,220,150) : trend_eu == "↓ 恶化" ? color.rgb(255,60,60) : c_lightgray
+
+// ==========================================
+// 9. 动态全局评测
+// ==========================================
+active_count      = (show_us ? 1 : 0) + (show_cn ? 1 : 0) + (show_jp ? 1 : 0) + (show_eu ? 1 : 0)
+active_count_safe = active_count > 0 ? active_count : 1
+
+avg_sev_raw = (show_us ? float(sev_us) : 0.0) + (show_cn ? float(sev_cn) : 0.0) + (show_jp ? float(sev_jp) : 0.0) + (show_eu ? float(sev_eu) : 0.0)
+avg_sev     = avg_sev_raw / float(active_count_safe)
+
+avg_debt_raw = (show_us ? us_d : 0.0) + (show_cn ? cn_d : 0.0) + (show_jp ? jp_d : 0.0) + (show_eu ? eu_d : 0.0)
+avg_debt     = avg_debt_raw / float(active_count_safe)
+
+float urgent_thresh  = active_count <= 1 ? 4.0 : active_count == 2 ? 3.5 : 3.0
+float warning_thresh = active_count <= 1 ? 3.0 : active_count == 2 ? 2.5 : 2.0
+
+is_urgent  = avg_sev >= urgent_thresh  or avg_debt > 160
+is_warning = not is_urgent and (avg_sev >= warning_thresh or avg_debt > 120)
+
+bg_color = is_urgent ? color.new(color.red, 88) : is_warning ? color.new(color.orange, 92) : na
+bgcolor(bg_color, title="宏观风险背景")
+
+// ==========================================
+// 10. 看板渲染
+// ==========================================
+var table info = table.new(position.top_right, 5, 9, bgcolor=c_black_bg, border_width=1, border_color=c_gray)
+
+if barstate.islast
+
+    avg_val_raw = (show_us ? res_us : 0.0) + (show_cn ? res_cn : 0.0) + (show_jp ? res_jp : 0.0) + (show_eu ? res_eu : 0.0)
+    avg_val     = avg_val_raw / float(active_count_safe)
+
+    string global_desc = ""
+
+    if active_count == 0
+        global_desc := "⚪【提示】所有经济体已关闭"
+    else if active_count == 1
+        int  solo_sev   = show_us ? sev_us   : show_cn ? sev_cn   : show_jp ? sev_jp   : sev_eu
+        string solo_name = show_us ? "美国"   : show_cn ? "中国"   : show_jp ? "日本"   : "欧洲"
+        string solo_trnd = show_us ? trend_us : show_cn ? trend_cn : show_jp ? trend_jp : trend_eu
+        global_desc := "🔍 单国分析【" + solo_name + "】严重度=" + f_diag_text(solo_sev) + "  趋势=" + solo_trnd
+        if is_urgent
+            global_desc += "  | 🔴 已进入债务危机区间"
+        else if is_warning
+            global_desc += "  | 🟠 处于去杠杆压力区"
+        else if solo_sev == 2
+            global_desc += "  | 🟡 中性区间"
+        else
+            global_desc += "  | 🟢 债务周期健康"
+    else
+        if is_mode_A
+            if avg_val > 1.0 and not is_urgent
+                global_desc := "⭐ g-i正利差主导 扩张潜力强"
+            else if avg_val > 0.0 and not is_urgent
+                global_desc := "🟡 轻度正利差 警惕利率侵蚀"
+            else
+                global_desc := "⚠ g-i平衡或转负 警惕同步去杠杆"
+        else
+            if is_urgent
+                global_desc := "🔴 高风险债务周期  可能引发流动性危机"
+            else if is_warning
+                global_desc := "🟠 债务中高位 整体可控"
+            else
+                global_desc := "🟢 债务周期中性  可持续阶段"
+
+    string active_hint = "（" + str.tostring(active_count) + "/4 国参与）"
+
+    // ---- 行0：全局提示 ----
+    table.merge_cells(info, 0, 0, 4, 0)
+    table.cell(info, 0, 0, "🌍 " + global_desc + "  " + active_hint, text_color = is_urgent ? color.rgb(255, 140, 0) : is_warning ? c_orange : color.white, text_size = text_sz, text_halign = text.align_left, bgcolor = c_black_bg)
+
+    // ---- 行1：表头 ----
+    table.cell(info, 0, 1, "宏观监测", text_color=c_white, bgcolor=c_gray, text_size=text_sz)
+    table.cell(info, 1, 1, show_us ? "🇺🇸 美国" : "美国", text_color=show_us ? color.blue   : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 1, show_cn ? "🇨🇳 中国" : "中国", text_color=show_cn ? color.red    : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 1, show_jp ? "🇯🇵 日本" : "日本", text_color=show_jp ? color.orange : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 1, show_eu ? "🇪🇺 欧洲" : "欧洲", text_color=show_eu ? color.teal   : c_inactive, text_size=text_sz)
+
+    // ---- 行2：总债务/GDP ----
+    table.cell(info, 0, 2, "总债务/GDP", text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 2, show_us ? str.tostring(us_d, "#.#") + "%" : "—", text_color=show_us ? (us_d > 130 ? c_orange : c_white) : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 2, show_cn ? str.tostring(cn_d, "#.#") + "%" : "—", text_color=show_cn ? (cn_d > 130 ? c_orange : c_white) : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 2, show_jp ? str.tostring(jp_d, "#.#") + "%" : "—", text_color=show_jp ? (jp_d > 130 ? c_orange : c_white) : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 2, show_eu ? str.tostring(eu_d, "#.#") + "%" : "—", text_color=show_eu ? (eu_d > 130 ? c_orange : c_white) : c_inactive, text_size=text_sz)
+
+    // ---- 行3：指标值 ----
+    string label_p = is_mode_A ? "利差(g-i)" : "利息负担"
+    table.cell(info, 0, 3, label_p, text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 3, show_us ? str.tostring(res_us, "#.##") + "%" : "—", text_color=show_us ? f_sev_col(sev_us) : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 3, show_cn ? str.tostring(res_cn, "#.##") + "%" : "—", text_color=show_cn ? f_sev_col(sev_cn) : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 3, show_jp ? str.tostring(res_jp, "#.##") + "%" : "—", text_color=show_jp ? f_sev_col(sev_jp) : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 3, show_eu ? str.tostring(res_eu, "#.##") + "%" : "—", text_color=show_eu ? f_sev_col(sev_eu) : c_inactive, text_size=text_sz)
+
+    // ---- 行4：总计利息压力 (已应用颜色判定) ----
+    table.cell(info, 0, 4, "总计利息压力", text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 4, show_us ? str.tostring(tp_us, "#.##") : "—", text_color=show_us ? f_tp_col(tp_us) : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 4, show_cn ? str.tostring(tp_cn, "#.##") : "—", text_color=show_cn ? f_tp_col(tp_cn) : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 4, show_jp ? str.tostring(tp_jp, "#.##") : "—", text_color=show_jp ? f_tp_col(tp_jp) : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 4, show_eu ? str.tostring(tp_eu, "#.##") : "—", text_color=show_eu ? f_tp_col(tp_eu) : c_inactive, text_size=text_sz)
+
+    // ---- 行5：5级状态诊断 ----
+    table.cell(info, 0, 5, "状态诊断", text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 5, show_us ? f_diag_text(sev_us) : "—", text_color=show_us ? f_sev_col(sev_us) : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 5, show_cn ? f_diag_text(sev_cn) : "—", text_color=show_cn ? f_sev_col(sev_cn) : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 5, show_jp ? f_diag_text(sev_jp) : "—", text_color=show_jp ? f_sev_col(sev_jp) : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 5, show_eu ? f_diag_text(sev_eu) : "—", text_color=show_eu ? f_sev_col(sev_eu) : c_inactive, text_size=text_sz)
+
+    // ---- 行6：近期趋势 ----
+    table.cell(info, 0, 6, "近期趋势", text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 6, show_us ? trend_us : "—", text_color=show_us ? trend_col_us : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 6, show_cn ? trend_cn : "—", text_color=show_cn ? trend_col_cn : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 6, show_jp ? trend_jp : "—", text_color=show_jp ? trend_col_jp : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 6, show_eu ? trend_eu : "—", text_color=show_eu ? trend_col_eu : c_inactive, text_size=text_sz)
+
+    // ---- 行7：Dalio视角 ----
+    table.cell(info, 0, 7, "Dalio视角", text_color=c_lightgray, text_size=text_sz)
+    table.cell(info, 1, 7, show_us ? f_comp_diag(us_d, calc_mode, sev_us) : "排除", text_color=show_us ? f_sev_col(sev_us) : c_inactive, text_size=text_sz)
+    table.cell(info, 2, 7, show_cn ? f_comp_diag(cn_d, calc_mode, sev_cn) : "排除", text_color=show_cn ? f_sev_col(sev_cn) : c_inactive, text_size=text_sz)
+    table.cell(info, 3, 7, show_jp ? f_comp_diag(jp_d, calc_mode, sev_jp) : "排除", text_color=show_jp ? f_sev_col(sev_jp) : c_inactive, text_size=text_sz)
+    table.cell(info, 4, 7, show_eu ? f_comp_diag(eu_d, calc_mode, sev_eu) : "排除", text_color=show_eu ? f_sev_col(sev_eu) : c_inactive, text_size=text_sz)
+
+    // ---- 行8：评测状态 ----
+    table.cell(info, 0, 8, "评测状态", text_color=c_lightgray, text_size=text_sz, bgcolor=color.new(#1a1a2e, 0))
+    table.cell(info, 1, 8, show_us ? "✅ 参与" : "⬜ 排除", text_color=show_us ? color.green : c_inactive, text_size=text_sz, bgcolor=color.new(#1a1a2e, 0))
+    table.cell(info, 2, 8, show_cn ? "✅ 参与" : "⬜ 排除", text_color=show_cn ? color.green : c_inactive, text_size=text_sz, bgcolor=color.new(#1a1a2e, 0))
+    table.cell(info, 3, 8, show_jp ? "✅ 参与" : "⬜ 排除", text_color=show_jp ? color.green : c_inactive, text_size=text_sz, bgcolor=color.new(#1a1a2e, 0))
+    table.cell(info, 4, 8, show_eu ? "✅ 参与" : "⬜ 排除", text_color=show_eu ? color.green : c_inactive, text_size=text_sz, bgcolor=color.new(#1a1a2e, 0))
+
+// ==========================================
+// 11. 曲线绘图
+// ==========================================
+p_us = view_mode == "总计利息压力" ? tp_us : view_mode == "总债务/GDP" ? us_d : res_us
+p_cn = view_mode == "总计利息压力" ? tp_cn : view_mode == "总债务/GDP" ? cn_d : res_cn
+p_jp = view_mode == "总计利息压力" ? tp_jp : view_mode == "总债务/GDP" ? jp_d : res_jp
+p_eu = view_mode == "总计利息压力" ? tp_eu : view_mode == "总债务/GDP" ? eu_d : res_eu
+
+plot(show_us ? p_us : na, "US", color=color.blue,   linewidth=2)
+plot(show_cn ? p_cn : na, "CN", color=color.red,    linewidth=2)
+plot(show_jp ? p_jp : na, "JP", color=color.orange, linewidth=2)
+plot(show_eu ? p_eu : na, "EU", color=color.teal,   linewidth=2)
+
+base_l = view_mode == "总计利息压力" ? na : view_mode == "总债务/GDP" ? 130.0 : (is_mode_A ? 0.0 : 3.5)
+hline(base_l, "Reference", color=color.new(#ffffff, 50), linestyle=hline.style_dashed)
