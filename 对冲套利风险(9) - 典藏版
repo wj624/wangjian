@@ -1,0 +1,319 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Macro_Quant_Dev
+
+//@version=6
+indicator("对冲套利风险(9) - 典藏版", overlay=false, precision=2)
+
+// ==========================================
+// 1. 核心参数设置
+// ==========================================
+grp_base = "【基准流入国家设置】"
+base_country = input.string("美国", "目标流入国家 (目的地)", options=["美国", "日本", "欧洲", "中国"], group=grp_base)
+
+grp_macro = "【债务自动抓取与沙盘推演】"
+use_auto_debt = input.bool(true, "🔴 开启自动抓取实时债务率", group=grp_macro)
+us_debt_threshold = input.float(100.0, "主权债务安全阈值 (%)", group=grp_macro)
+daf_k = input.float(0.05, "风险放大系数 (k)", group=grp_macro, tooltip="主权债务超出安全线的惩罚乘数")
+
+bk_us = input.float(123.0, "推演：美国债务率 (%)", group=grp_macro)
+bk_jp = input.float(254.0, "推演：日本债务率 (%)", group=grp_macro)
+bk_eu = input.float(89.0, "推演：欧洲债务率 (%)", group=grp_macro)
+bk_cn = input.float(83.0, "推演：中国债务率 (%)", group=grp_macro)
+
+grp_gold = "【黄金避险共振监控】"
+gold_lookback = input.int(21, "黄金/流动性监控周期", group=grp_gold, tooltip="默认21个交易日(约1个月)")
+gold_mom_th = input.float(2.0, "黄金主升浪阈值 (%)", group=grp_gold)
+
+grp_fx = "【裸敞口汇率赌徒监控】"
+fx_lookback = input.int(60, "汇率动能监控周期", group=grp_fx, tooltip="默认60个交易日(约1个季度)")
+fx_stampede_th = input.float(-5.0, "恐慌踩踏汇率阈值 (%)", group=grp_fx, tooltip="持有期内汇率贬值超过此数值触发无差别抛售")
+
+grp_bg_switch = "【背景开关与回测辅助】"
+show_zone_bg = input.bool(true, "显示 压力分区带 (横向黄/红带)", group=grp_bg_switch)
+show_macro_bg = input.bool(true, "显示 宏观极端状态 (休克/逃亡)", group=grp_bg_switch)
+show_unhedged_bg = input.bool(true, "显示 裸敞口盈亏周期 (双击/反噬/踩踏)", group=grp_bg_switch)
+
+grp_col_1 = "【背景颜色自定义】 1. 分区带"
+col_zone_warn = input.color(color.new(color.yellow, 70), "📌 风险预警区", group=grp_col_1)
+col_zone_ext = input.color(color.new(color.red, 70), "📌 极端撤离区", group=grp_col_1)
+
+grp_col_2 = "【背景颜色自定义】 2. 宏观状态"
+col_bg_shock = input.color(color.new(#4a0080, 75), "⚡ 流动性休克", group=grp_col_2)
+col_bg_fiat = input.color(color.new(color.red, 85), "🔥 法币大逃亡", group=grp_col_2)
+
+grp_col_3 = "【背景颜色自定义】 3. 裸敞口多头"
+col_bg_stampede = input.color(color.new(color.red, 75), "🚨 恐慌踩踏 (汇率血亏)", group=grp_col_3)
+col_bg_wiped = input.color(color.new(color.orange, 85), "🟠 利润反噬 (白拿利息)", group=grp_col_3)
+col_bg_win = input.color(color.new(color.lime, 92), "🟢 利汇双击 (多头狂欢)", group=grp_col_3)
+
+grp_vis = "【视觉与缩放设置】"
+table_text_size = input.string("小 (Small)", "看板文字大小", options=["极小 (Tiny)", "小 (Small)", "中 (Normal)", "大 (Large)", "超大 (Huge)"], group=grp_vis)
+bg_top_limit = input.float(3.0, "背景红区高度 (Y轴缩放)", step=0.5, group=grp_vis)
+
+f_get_size(_s) =>
+    _s == "极小 (Tiny)" ? size.tiny : (_s == "小 (Small)" ? size.small : (_s == "中 (Normal)" ? size.normal : (_s == "大 (Large)" ? size.large : size.huge)))
+
+// ==========================================
+// 2. 跨市场数据调取 (极严密防断层与防穿越)
+// ==========================================
+f_secure_req(_ticker) =>
+    float val = request.security(_ticker, timeframe.period, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    nz(ta.valuewhen(not na(val), val, 0), 0.0)
+
+us_10y = f_secure_req("TVC:US10Y")
+us_02y = f_secure_req("TVC:US02Y")
+jp_10y = f_secure_req("TVC:JP10Y")
+jp_02y = f_secure_req("TVC:JP02Y")
+eu_10y = f_secure_req("TVC:DE10Y")
+eu_02y = f_secure_req("TVC:DE02Y")
+cn_10y = f_secure_req("TVC:CN10Y")
+cn_02y = f_secure_req("TVC:CN02Y")
+
+f_get_econ(_ticker, _safe_default) =>
+    float val = request.security(_ticker, "1D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    nz(ta.valuewhen(not na(val) and val != 0, val, 0), _safe_default)
+
+// 债务数据
+auto_us = f_get_econ("FRED:GFDEGDQ188S", 60.0) 
+auto_jp = f_get_econ("ECONOMICS:JPGDG", 150.0)   
+auto_eu = f_get_econ("ECONOMICS:EUGDG", 70.0)
+auto_cn = f_get_econ("ECONOMICS:CNGDG", 40.0)
+
+// 黄金动能
+gold_val = f_secure_req("TVC:GOLD")
+gold_prev = nz(gold_val[gold_lookback], gold_val)
+gold_mom = gold_prev != 0 ? (gold_val - gold_prev) / gold_prev * 100 : 0.0
+
+// ==========================================
+// 3. 美联储净流动性与汇率动能底座
+// ==========================================
+// 流动性：直接采用绝对值除以 1T 规避量级坍塌
+raw_assets = f_get_econ("ECONOMICS:USCBBS", 7000000000000.0)
+raw_tga    = f_get_econ("FRED:WTREGEN", 800000000000.0)
+raw_rrp    = f_get_econ("FRED:RRPONTSYD", 200000000000.0)
+
+fed_assets_t = raw_assets / 1000000000000.0
+tga_t        = raw_tga / 1000000000000.0
+rrp_t        = raw_rrp / 1000000000000.0
+
+net_liq_t = fed_assets_t - tga_t - rrp_t
+net_liq_prev = nz(net_liq_t[gold_lookback], net_liq_t)
+
+net_liq_mom = net_liq_prev != 0 ? (net_liq_t - net_liq_prev) / math.abs(net_liq_prev) * 100 : 0.0
+bool is_liq_draining = net_liq_mom < -1.5  
+
+// 汇率监控：自动匹配目标国锚定货币
+dxy_val = f_secure_req("TVC:DXY")
+eur_val = f_secure_req("FX_IDC:EURUSD")
+jpy_val = f_secure_req("FX_IDC:USDJPY")
+cny_val = f_secure_req("FX_IDC:USDCNY")
+
+dxy_prev = nz(dxy_val[fx_lookback], dxy_val)
+eur_prev = nz(eur_val[fx_lookback], eur_val)
+jpy_prev = nz(jpy_val[fx_lookback], jpy_val)
+cny_prev = nz(cny_val[fx_lookback], cny_val)
+
+// 核心金融引擎：正反向汇率动能映射 (USD/JPY 与 USD/CNY 为反向计价，故加负号取反，真实反映美元资金购买该国资产时的汇率盈亏)
+dxy_mom = dxy_prev != 0 ? (dxy_val - dxy_prev) / dxy_prev * 100 : 0.0
+eur_mom = eur_prev != 0 ? (eur_val - eur_prev) / eur_prev * 100 : 0.0
+jpy_mom = jpy_prev != 0 ? -((jpy_val - jpy_prev) / jpy_prev * 100) : 0.0 
+cny_mom = cny_prev != 0 ? -((cny_val - cny_prev) / cny_prev * 100) : 0.0
+
+float fx_mom = base_country == "美国" ? dxy_mom : (base_country == "欧洲" ? eur_mom : (base_country == "日本" ? jpy_mom : cny_mom))
+string fx_name = base_country == "美国" ? "DXY(美元指数)" : (base_country == "欧洲" ? "EUR/USD" : (base_country == "日本" ? "USD/JPY(反向)" : "USD/CNY(反向)"))
+
+// ==========================================
+// 4. 压力评分与宏观状态共振判定
+// ==========================================
+float current_auto = base_country == "美国" ? auto_us : (base_country == "日本" ? auto_jp : (base_country == "欧洲" ? auto_eu : auto_cn))
+float current_manual = base_country == "美国" ? bk_us : (base_country == "日本" ? bk_jp : (base_country == "欧洲" ? bk_eu : bk_cn))
+float debt_val = use_auto_debt ? current_auto : current_manual
+
+float risk_penalty = daf_k * math.max(0, debt_val - us_debt_threshold)
+
+// 独立剥离的全局美元债务约束（无论目的地设为哪国，只要美国债务暴雷且抽水，强制触发休克）
+float global_us_debt = use_auto_debt ? auto_us : bk_us
+float us_risk_penalty = daf_k * math.max(0, global_us_debt - us_debt_threshold)
+bool is_naked_shock = (us_risk_penalty > 1.0) and is_liq_draining
+
+bool is_fiat_fleeing = (risk_penalty > 1.0) and (gold_mom > gold_mom_th)
+
+float b_10y = base_country == "美国" ? us_10y : (base_country == "日本" ? jp_10y : (base_country == "欧洲" ? eu_10y : cn_10y))
+float b_02y = base_country == "美国" ? us_02y : (base_country == "日本" ? jp_02y : (base_country == "欧洲" ? eu_02y : cn_02y))
+
+// 未对冲资金(裸多头)状态机判定：目标国纯收益 + 汇率涨跌幅
+float risk_adj_interest = b_10y - risk_penalty
+float unhedged_total = risk_adj_interest + fx_mom
+
+// 敞口四季轮回判定树 (互斥设计)
+bool is_stampede = unhedged_total < 0 and fx_mom <= fx_stampede_th
+bool is_profit_wiped = unhedged_total < 0 and fx_mom > fx_stampede_th
+bool is_safe_buffer = fx_mom <= 0 and unhedged_total >= 0
+bool is_double_win = fx_mom > 0 and unhedged_total >= 0
+
+string unhedged_state = is_stampede ? "🚨 恐慌踩踏" : (is_profit_wiped ? "🟠 利润反噬" : (is_safe_buffer ? "🟡 安全缓冲" : "🟢 利汇双击"))
+color unhedged_col = is_stampede ? color.red : (is_profit_wiped ? color.orange : (is_safe_buffer ? color.yellow : color.lime))
+
+// CIP对冲成本推演公式 (严密兼容正反向利差)
+f_calc_flow(_t_10y, _t_02y, _b_10y, _b_02y) =>
+    float hedge_cost = _b_02y - _t_02y            
+    float raw_yield = _b_10y - hedge_cost      
+    float risk_adj_yield = raw_yield - risk_penalty 
+    float severity = _t_10y - risk_adj_yield         
+    [hedge_cost, risk_adj_yield, severity]
+
+[u_h, u_yh, u_s] = f_calc_flow(us_10y, us_02y, b_10y, b_02y)
+[j_h, j_yh, j_s] = f_calc_flow(jp_10y, jp_02y, b_10y, b_02y)
+[e_h, e_yh, e_s] = f_calc_flow(eu_10y, eu_02y, b_10y, b_02y)
+[c_h, c_yh, c_s] = f_calc_flow(cn_10y, cn_02y, b_10y, b_02y)
+
+// ==========================================
+// 5. 图表呈现与完全自定义背景引擎
+// ==========================================
+color col_us = color.new(#eabcf1, 0)
+color col_jp = color.new(color.red, 0)
+color col_eu = color.new(#93cefd, 0)
+color col_cn = color.new(color.orange, 0)
+
+plot(base_country == "美国" ? na : u_s, title="美国压力", color=col_us, linewidth=2)
+plot(base_country == "日本" ? na : j_s, title="日本压力", color=col_jp, linewidth=2)
+plot(base_country == "欧洲" ? na : e_s, title="欧洲压力", color=col_eu, linewidth=2)
+plot(base_country == "中国" ? na : c_s, title="中国压力", color=col_cn, linewidth=2)
+
+h0 = hline(0.0, "平衡线", color=color.new(color.gray, 50), linestyle=hline.style_dotted)
+h1 = hline(0.5, "预警线", color=color.new(color.yellow, 50), linestyle=hline.style_dashed)
+h2 = hline(1.5, "抛售线", color=color.new(color.red, 50), linestyle=hline.style_solid)
+h3 = hline(bg_top_limit, "缩放顶线", color=color.new(color.white, 100))
+
+// 压力分区带
+fill(h1, h2, color=show_zone_bg ? col_zone_warn : na, title="区带：风险预警")
+fill(h2, h3, color=show_zone_bg ? col_zone_ext : na, title="区带：极端撤离")
+
+// 核心渲染器：防重叠背景仲裁机制 (优先级决定色彩)
+color final_bg = na
+if show_macro_bg and is_naked_shock
+    final_bg := col_bg_shock
+else if show_unhedged_bg and is_stampede
+    final_bg := col_bg_stampede
+else if show_macro_bg and is_fiat_fleeing
+    final_bg := col_bg_fiat
+else if show_unhedged_bg and is_profit_wiped
+    final_bg := col_bg_wiped
+else if show_unhedged_bg and is_double_win
+    final_bg := col_bg_win
+
+bgcolor(final_bg, title="全局宏观与敞口背景")
+
+// ==========================================
+// 6. AI 仲裁执行官 (6阶绝对优先级裁决树)
+// ==========================================
+float max_sev = -999.0
+if base_country == "美国"
+    max_sev := math.max(j_s, e_s, c_s)
+else if base_country == "日本"
+    max_sev := math.max(u_s, e_s, c_s)
+else if base_country == "欧洲"
+    max_sev := math.max(u_s, j_s, c_s)
+else
+    max_sev := math.max(u_s, j_s, e_s)
+
+string ai_text = ""
+color ai_col = na
+
+// 此处的 if...else if 顺序为不可变的绝对执行级，不可随意调换
+if is_naked_shock
+    // 👑 优先级 0：系统性毁灭
+    ai_text := "🚨【绝对防御】美元底座断电！清仓所有带波动的风险资产。全仓超短端国债(T-Bills)或逆回购吃息，死等印钞机重启。"
+    ai_col := color.rgb(208, 116, 255) 
+else if is_fiat_fleeing
+    // 👑 优先级 1：法币信用崩塌
+    ai_text := "🔥【抢筹硬资产】法币带毒！做空目标国长债；重仓黄金等零息硬通货；防范恶性通胀反扑。"
+    ai_col := color.red
+else if is_stampede
+    // 👑 优先级 2：裸多头连环爆仓 (直接阻断下方的常规套利预警)
+    ai_text := "🚨【踩踏预警】裸多头利润彻底击穿！汇率暴跌引发恐慌抛售，警惕债市汇市「双杀踩踏」，立即抽离未对冲头寸。"
+    ai_col := color.red
+else if max_sev >= 1.5 or is_profit_wiped
+    // 👑 优先级 3：长线套利崩盘 或 游资止盈
+    ai_text := "⚠️【资本大撤退】跨国套利崩盘或敞口利润反噬！停止新增投资，逐步抛售目标国资产，资金回撤。"
+    ai_col := color.orange
+else if is_liq_draining or max_sev >= 0
+    // 👑 优先级 4：逆风减速
+    ai_text := "🔔【逆风防御】水池缩紧或超额收益消失！停止扩表加杠杆，切换至高股息价值股，严密监控汇率敞口。"
+    ai_col := color.yellow
+else
+    // 👑 优先级 5：完美风暴
+    ai_text := "✅【顺风做多】蜜月期！享受流动性与汇率双重溢价；大胆配置目标国核心权益与高评级债券，利用杠杆放大收益。"
+    ai_col := color.lime
+
+// ==========================================
+// 7. 全局看板生成
+// ==========================================
+var table dash = table.new(position.middle_right, 7, 10, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.gray)
+t_size = f_get_size(table_text_size)
+
+f_fill_row(table _d, int _r, string _n, float _y10, float _y2, float _h, float _yh, float _s, string _base, color _line_col, string _sz) =>
+    bool is_base = _n == _base
+    string st = is_base ? "--- 目的地 ---" : (_s < 0 ? "资金流入" : (_s < 1.5 ? "风险平仓" : "极端撤离"))
+    color bg_c = is_base ? color.new(color.gray, 50) : (_s < 0 ? color.new(color.green, 70) : (_s < 1.5 ? color.new(color.orange, 70) : color.new(color.red, 70)))
+    color n_col = is_base ? color.white : _line_col
+    
+    table.cell(_d, 0, _r, _n, text_color=n_col, text_size=_sz)
+    table.cell(_d, 1, _r, str.tostring(_y10, "#.##")+"%", text_color=color.white, text_size=_sz)
+    table.cell(_d, 2, _r, str.tostring(_y2, "#.##")+"%", text_color=color.white, text_size=_sz)
+    table.cell(_d, 3, _r, is_base ? "-" : str.tostring(_h, "#.##")+"%", text_color=color.white, text_size=_sz)
+    table.cell(_d, 4, _r, is_base ? "-" : str.tostring(_yh, "#.##")+"%", text_color=color.white, text_size=_sz)
+    table.cell(_d, 5, _r, is_base ? "-" : str.tostring(_s, "#.##"), text_color=color.white, bgcolor=bg_c, text_size=_sz)
+    table.cell(_d, 6, _r, st, text_color=color.white, bgcolor=bg_c, text_size=_sz)
+
+if barstate.islast
+    table.cell(dash, 0, 0, "国家/地区", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 1, 0, "10Y收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 2, 0, "2Y收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 3, 0, "锁汇成本", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 4, 0, "风调真实收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 5, 0, "流向压力", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 6, 0, "当前状态", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+
+    table.cell(dash, 0, 1, "【宏观锚点】", text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=t_size)
+    table.cell(dash, 1, 1, "目的地:", text_color=color.yellow, text_size=t_size)
+    table.cell(dash, 2, 1, base_country, text_color=color.yellow, text_size=t_size)
+    table.cell(dash, 3, 1, "实时债务:", text_color=color.yellow, text_size=t_size)
+    table.cell(dash, 4, 1, str.tostring(debt_val, "#.#")+"%", text_color=color.yellow, text_size=t_size)
+    table.cell(dash, 5, 1, "风险剥夺:", text_color=color.red, text_size=t_size)
+    table.cell(dash, 6, 1, "-" + str.tostring(risk_penalty, "#.##")+"%", text_color=color.red, text_size=t_size)
+
+    f_fill_row(dash, 2, "美国", us_10y, us_02y, u_h, u_yh, u_s, base_country, col_us, t_size)
+    f_fill_row(dash, 3, "日本", jp_10y, jp_02y, j_h, j_yh, j_s, base_country, col_jp, t_size)
+    f_fill_row(dash, 4, "欧洲", eu_10y, eu_02y, e_h, e_yh, e_s, base_country, col_eu, t_size)
+    f_fill_row(dash, 5, "中国", cn_10y, cn_02y, c_h, c_yh, c_s, base_country, col_cn, t_size)
+
+    color gold_col = gold_mom > gold_mom_th ? color.lime : (gold_mom < 0 ? color.red : color.gray)
+    table.cell(dash, 0, 6, "【终极避险】", text_color=color.rgb(255, 215, 0), bgcolor=color.new(color.black, 0), text_size=t_size)
+    table.cell(dash, 1, 6, "标的物:", text_color=color.rgb(255, 255, 255), text_size=t_size)
+    table.cell(dash, 2, 6, "黄金 (XAU)", text_color=color.rgb(255, 215, 0), text_size=t_size)
+    table.cell(dash, 3, 6, "月度动能:", text_color=color.rgb(255, 255, 255), text_size=t_size)
+    table.cell(dash, 4, 6, str.tostring(gold_mom, "#.##")+"%", text_color=gold_col, text_size=t_size)
+    table.cell(dash, 5, 6, "法币状态:", text_color=color.rgb(255, 255, 255), text_size=t_size)
+    table.cell(dash, 6, 6, is_fiat_fleeing ? "🚨 弃法币买硬资产" : "正常轮动", text_color=is_fiat_fleeing ? color.red : color.lime, bgcolor=is_fiat_fleeing ? color.new(color.red, 80) : color.new(color.black, 0), text_size=t_size)
+
+    color liq_col = is_liq_draining ? color.red : color.lime
+    table.cell(dash, 0, 7, "【系统底座】", text_color=color.rgb(0, 200, 255), bgcolor=color.new(color.black, 0), text_size=t_size)
+    table.cell(dash, 1, 7, "美元净水池:", text_color=color.rgb(247, 247, 247), text_size=t_size)
+    table.cell(dash, 2, 7, str.tostring(net_liq_t, "#.##") + "兆(T)", text_color=color.rgb(0, 200, 255), text_size=t_size)
+    table.cell(dash, 3, 7, "月度抽放:", text_color=color.rgb(248, 250, 255), text_size=t_size)
+    table.cell(dash, 4, 7, str.tostring(net_liq_mom, "#.##")+"%", text_color=liq_col, text_size=t_size)
+    table.cell(dash, 5, 7, "水池状态:", text_color=color.rgb(255, 255, 255), text_size=t_size)
+    table.cell(dash, 6, 7, is_naked_shock ? "⚡ 全球休克" : (is_liq_draining ? "缩表抽水" : "充裕缓冲"), text_color=is_naked_shock ? color.red : color.lime, bgcolor=is_naked_shock ? color.new(#4a0080, 50) : color.new(color.black, 0), text_size=t_size)
+
+    table.cell(dash, 0, 8, "【裸敞口多头】", text_color=color.rgb(255, 120, 200), bgcolor=color.new(color.black, 0), text_size=t_size)
+    table.cell(dash, 1, 8, "参考汇率:", text_color=color.rgb(247, 247, 247), text_size=t_size)
+    table.cell(dash, 2, 8, fx_name, text_color=color.rgb(255, 120, 200), text_size=t_size)
+    table.cell(dash, 3, 8, "总收益(季):", text_color=color.rgb(248, 250, 255), text_size=t_size)
+    table.cell(dash, 4, 8, str.tostring(unhedged_total, "#.##")+"%", text_color=unhedged_total > 0 ? color.lime : color.red, text_size=t_size)
+    table.cell(dash, 5, 8, "敞口状态:", text_color=color.rgb(255, 255, 255), text_size=t_size)
+    table.cell(dash, 6, 8, unhedged_state, text_color=unhedged_col, bgcolor=is_stampede ? color.new(color.red, 70) : color.new(color.black, 0), text_size=t_size)
+
+    table.merge_cells(dash, 1, 9, 6, 9)
+    table.cell(dash, 0, 9, "【AI 执行官】", text_color=color.white, bgcolor=color.new(ai_col, 50), text_size=t_size)
+    table.cell(dash, 1, 9, ai_text, text_color=ai_col, bgcolor=color.new(color.black, 0), text_size=t_size, text_halign=text.align_left)
