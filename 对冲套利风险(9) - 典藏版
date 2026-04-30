@@ -2,7 +2,7 @@
 // © Macro_Quant_Dev
 
 //@version=6
-indicator("对冲套利风险(9) - 典藏版", overlay=false, precision=2)
+indicator("对冲套利风险(10) - 典藏版", overlay=false, precision=2)
 
 // ==========================================
 // 1. 核心参数设置
@@ -34,16 +34,16 @@ show_macro_bg = input.bool(true, "显示 宏观极端状态 (休克/逃亡)", gr
 show_unhedged_bg = input.bool(true, "显示 裸敞口盈亏周期 (双击/反噬/踩踏)", group=grp_bg_switch)
 
 grp_col_1 = "【背景颜色自定义】 1. 分区带"
-col_zone_warn = input.color(color.new(color.yellow, 70), "📌 风险预警区", group=grp_col_1)
-col_zone_ext = input.color(color.new(color.red, 70), "📌 极端撤离区", group=grp_col_1)
+col_zone_warn = input.color(color.new(#ffeb3b, 50), "📌 风险预警区", group=grp_col_1)
+col_zone_ext = input.color(color.new(#ff5252, 50), "📌 极端撤离区", group=grp_col_1)
 
 grp_col_2 = "【背景颜色自定义】 2. 宏观状态"
-col_bg_shock = input.color(color.new(#4a0080, 75), "⚡ 流动性休克", group=grp_col_2)
-col_bg_fiat = input.color(color.new(color.red, 85), "🔥 法币大逃亡", group=grp_col_2)
+col_bg_shock = input.color(color.new(#4b0080, 61), "⚡ 流动性休克", group=grp_col_2)
+col_bg_fiat = input.color(color.new(#52ceff, 31), "🔥 法币大逃亡", group=grp_col_2)
 
 grp_col_3 = "【背景颜色自定义】 3. 裸敞口多头"
-col_bg_stampede = input.color(color.new(color.red, 75), "🚨 恐慌踩踏 (汇率血亏)", group=grp_col_3)
-col_bg_wiped = input.color(color.new(color.orange, 85), "🟠 利润反噬 (白拿利息)", group=grp_col_3)
+col_bg_stampede = input.color(color.new(#ff5252, 51), "🚨 恐慌踩踏 (汇率血亏)", group=grp_col_3)
+col_bg_wiped = input.color(color.new(#ff9900, 65), "🟠 利润反噬 (白拿利息)", group=grp_col_3)
 col_bg_win = input.color(color.new(color.lime, 92), "🟢 利汇双击 (多头狂欢)", group=grp_col_3)
 
 grp_vis = "【视觉与缩放设置】"
@@ -270,9 +270,9 @@ if barstate.islast
     table.cell(dash, 0, 0, "国家/地区", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 1, 0, "10Y收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 2, 0, "2Y收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
-    table.cell(dash, 3, 0, "锁汇成本", text_color=color.white, bgcolor=color.gray, text_size=t_size)
-    table.cell(dash, 4, 0, "风调真实收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
-    table.cell(dash, 5, 0, "流向压力", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 3, 0, "锁汇成本\n(目的2Y - 本国2Y)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 4, 0, "风调真实收益\n(目的10Y-锁汇-风险)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 5, 0, "流向压力\n(本国10Y - 风调)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 6, 0, "当前状态", text_color=color.white, bgcolor=color.gray, text_size=t_size)
 
     table.cell(dash, 0, 1, "【宏观锚点】", text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=t_size)
