@@ -272,7 +272,7 @@ if barstate.islast
     table.cell(dash, 2, 0, "2Y收益", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 3, 0, "锁汇成本\n(目的2Y - 本国2Y)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 4, 0, "风调真实收益\n(目的10Y-锁汇-风险)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
-    table.cell(dash, 5, 0, "流向压力\n(本国10Y - 风调)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
+    table.cell(dash, 5, 0, "流向压力\n(本国10Y - 风调后收益)", text_color=color.white, bgcolor=color.gray, text_size=t_size)
     table.cell(dash, 6, 0, "当前状态", text_color=color.white, bgcolor=color.gray, text_size=t_size)
 
     table.cell(dash, 0, 1, "【宏观锚点】", text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=t_size)
