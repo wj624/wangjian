@@ -1,69 +1,137 @@
 //@version=6
-indicator(title="RSI + MACD 背离提示 (含 ATR 波动率)", shorttitle="RSI+MACD+ATR背离", format=format.price, timeframe="", timeframe_gaps=true)
+indicator(title="AA RSI + MACD(Hist) + MFI 终极共振版 (精准测距+安全滑窗)", shorttitle="RSI+Hist+MFI", format=format.price, timeframe="", timeframe_gaps=true)
 
-// ==================== 输入参数 ====================
-len = input.int(title="RSI 周期", minval=1, defval=14, group="参数设置")
-src = input(title="RSI 数据源", defval=close, group="参数设置")
+// ==================== 1. 基础输入参数 ====================
+len = input.int(14, "RSI 周期", minval=1, group="参数设置")
+src = input(close, "数据源", group="参数设置")
 
-// RSI 颜色阈值
-rsiOverbought = input.int(title="RSI 超买阈值 (变红)", defval=80, minval=50, maxval=100, group="参数设置")
-rsiOversold   = input.int(title="RSI 超卖阈值 (变绿)", defval=20, minval=0,  maxval=50,  group="参数设置")
+rsiOverbought = input.int(80, "RSI 超买阈值", group="参数设置")
+rsiOversold   = input.int(20, "RSI 超卖阈值", group="参数设置")
 
-// MACD 参数
-macdFast = input.int(12, "MACD 快线周期", minval=1, group="MACD 背离设置")
-macdSlow = input.int(26, "MACD 慢线周期", minval=1, group="MACD 背离设置")
-macdSignal = input.int(9, "MACD 信号线周期", minval=1, group="MACD 背离设置")
+macdFast = input.int(12, "MACD 快线", group="MACD(Hist) 设置")
+macdSlow = input.int(26, "MACD 慢线", group="MACD(Hist) 设置")
+macdSignal = input.int(9, "MACD 信号线", group="MACD(Hist) 设置")
 
-// MACD 背离显示开关
-plotMacdBull = input.bool(title="显示常规看涨背离 (MACD)", defval=true, group="MACD 背离设置")
-plotMacdHiddenBull = input.bool(title="显示隐藏看涨背离 (MACD)", defval=false, group="MACD 背离设置")
-plotMacdBear = input.bool(title="显示常规看跌背离 (MACD)", defval=true, group="MACD 背离设置")
-plotMacdHiddenBear = input.bool(title="显示隐藏看跌背离 (MACD)", defval=false, group="MACD 背离设置")
+plotMacdBull = input.bool(true, "常规底背离 (MACD柱)", group="MACD(Hist) 设置")
+plotMacdHiddenBull = input.bool(false, "隐藏底背离 (MACD柱)", group="MACD(Hist) 设置")
+plotMacdBear = input.bool(true, "常规顶背离 (MACD柱)", group="MACD(Hist) 设置")
+plotMacdHiddenBear = input.bool(false, "隐藏顶背离 (MACD柱)", group="MACD(Hist) 设置")
 
-lbR = input.int(title="枢轴右视距", defval=5, minval=1, group="枢轴设置", display=display.none)
-lbL = input.int(title="枢轴左视距", defval=5, minval=1, group="枢轴设置", display=display.none)
-rangeUpper = input.int(title="最大回溯范围", defval=60, minval=5, group="枢轴设置", display=display.none)
-rangeLower = input.int(title="最小回溯范围", defval=5, minval=1, group="枢轴设置", display=display.none)
+lbR = input.int(5, "枢轴右视距", group="枢轴范围设置")
+lbL = input.int(5, "枢轴左视距", group="枢轴范围设置")
+rangeUpper = input.int(60, "最大回溯范围", group="枢轴范围设置")
+rangeLower = input.int(5, "最小回溯范围", group="枢轴范围设置")
 
-// RSI 背离显示开关
-plotBull = input.bool(title="显示常规看涨背离 (RSI)", defval=true, group="显示设置")
-plotHiddenBull = input.bool(title="显示隐藏看涨背离 (RSI)", defval=false, group="显示设置")
-plotBear = input.bool(title="显示常规看跌背离 (RSI)", defval=true, group="显示设置")
-plotHiddenBear = input.bool(title="显示隐藏看跌背离 (RSI)", defval=false, group="显示设置")
+plotBull = input.bool(true, "常规底背离 (RSI)", group="RSI 显示设置")
+plotHiddenBull = input.bool(false, "隐藏底背离 (RSI)", group="RSI 显示设置")
+plotBear = input.bool(true, "常规顶背离 (RSI)", group="RSI 显示设置")
+plotHiddenBear = input.bool(false, "隐藏顶背离 (RSI)", group="RSI 显示设置")
 
-// ==================== ATR 波动率设置 ====================
-showAtr = input.bool(true, "显示 ATR 波动率柱状图", group="ATR 波动率设置")
-atrLen = input.int(14, "ATR 周期", minval=1, group="ATR 波动率设置")
-atrLookback = input.int(100, "ATR 极值回溯周期", minval=10, group="ATR 波动率设置")
-atrMaxHeight = input.int(30, "柱状图最大显示高度", minval=10, maxval=100, group="ATR 波动率设置")
-atrHighLevel = input.int(80, "高波动率触发阈值 (%)", minval=50, maxval=100, group="ATR 波动率设置")
-atrLowLevel = input.int(20, "低波动率触发阈值 (%)", minval=1, maxval=50, group="ATR 波动率设置")
+showAtr = input.bool(true, "显示 ATR 波动率", group="ATR 设置")
+atrLen = input.int(14, "ATR 周期", group="ATR 设置")
+atrLookback = input.int(100, "ATR 极值回溯", group="ATR 设置")
+atrMaxHeight = input.int(100, "柱状图高度", group="ATR 设置") 
+
+mfiLen = input.int(14, "MFI 周期", group="MFI 共振设置")
+// 修复点 1：提示文字优化
+syncWindow = input.int(3, "MFI容错窗口(K线数)", minval=1, maxval=30, group="MFI 共振设置", tooltip="允许MFI提前的K线数量")
 
 // 颜色定义
 bearColor = color.red
 bullColor = color.green
-hiddenBullColor = color.new(color.green, 80)
-hiddenBearColor = color.new(color.red, 80)
 textColor = color.white
-noneColor = color.new(color.white, 100)
 
-// ==================== 计算指标 ====================
+// ==================== 2. 计算指标 ====================
 osc = ta.rsi(src, len)
-[macdLine, _, _] = ta.macd(close, macdFast, macdSlow, macdSignal)
+mfiVal = ta.mfi(hlc3, mfiLen)
+[_, _, macdHist] = ta.macd(src, macdFast, macdSlow, macdSignal)
 
 atr = ta.atr(atrLen)
 atrMax = ta.highest(atr, atrLookback)
 atrMin = ta.lowest(atr, atrLookback)
-
 atrPercent = (atr - atrMin) / math.max(atrMax - atrMin, 0.000001) * 100
 normalizedAtr = (atrPercent / 100) * atrMaxHeight
-atrColor = atrPercent >= atrHighLevel ? color.new(color.orange, 60) : atrPercent <= atrLowLevel ? color.new(color.green, 60) : color.new(#787B86, 80)
+atrColor = atrPercent >= 80 ? color.new(color.orange, 60) : atrPercent <= 20 ? color.new(color.green, 60) : color.new(#787B86, 80)
 
-// ==================== 绘图部分 ===================
+// ==================== 3. 枢轴点检测与全局范围 (核心重构区) ====================
+plFound = not na(ta.pivotlow(osc, lbL, lbR))
+phFound = not na(ta.pivothigh(osc, lbL, lbR))
+
+macdPlFound = not na(ta.pivotlow(macdHist, lbL, lbR))
+macdPhFound = not na(ta.pivothigh(macdHist, lbL, lbR))
+
+mfiPlFound = not na(ta.pivotlow(mfiVal, lbL, lbR))
+mfiPhFound = not na(ta.pivothigh(mfiVal, lbL, lbR))
+
+// 修复点 2：使用 bar_index 测算绝对距离，代码极简且完美防误差
+_inRange(cond) =>
+    dist = bar_index - ta.valuewhen(cond, bar_index, 1)
+    rangeLower <= dist and dist <= rangeUpper
+
+// 修复点 3：直接传参，摒弃滞后的 [1] 索引
+inRangePl = _inRange(plFound)
+inRangePh = _inRange(phFound)
+inRangeMacdPl = _inRange(macdPlFound)
+inRangeMacdPh = _inRange(macdPhFound)
+inRangeMfiPl = _inRange(mfiPlFound)
+inRangeMfiPh = _inRange(mfiPhFound)
+
+// ==================== 4. 独立背离状态提取 ====================
+// --- MFI ---
+mfiBullAlert = low[lbR] < ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
+mfiBearAlert = high[lbR] > ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
+mfiHidBullAlert = low[lbR] > ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
+mfiHidBearAlert = high[lbR] < ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
+
+// --- RSI ---
+rsiBullAlert = low[lbR] < ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
+rsiBearAlert = high[lbR] > ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
+rsiHidBullAlert = low[lbR] > ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
+rsiHidBearAlert = high[lbR] < ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
+
+// --- MACD (Hist) ---
+macdBullAlert = low[lbR] < ta.valuewhen(macdPlFound, low[lbR], 1) and macdHist[lbR] > ta.valuewhen(macdPlFound, macdHist[lbR], 1) and macdPlFound and inRangeMacdPl
+macdBearAlert = high[lbR] > ta.valuewhen(macdPhFound, high[lbR], 1) and macdHist[lbR] < ta.valuewhen(macdPhFound, macdHist[lbR], 1) and macdPhFound and inRangeMacdPh
+macdHidBullAlert = low[lbR] > ta.valuewhen(macdPlFound, low[lbR], 1) and macdHist[lbR] < ta.valuewhen(macdPlFound, macdHist[lbR], 1) and macdPlFound and inRangeMacdPl
+macdHidBearAlert = high[lbR] < ta.valuewhen(macdPhFound, high[lbR], 1) and macdHist[lbR] > ta.valuewhen(macdPhFound, macdHist[lbR], 1) and macdPhFound and inRangeMacdPh
+
+// ==================== 5. 安全滑窗过滤 ====================
+// 修复点 4：长度使用 syncWindow + 1，真正覆盖用户设置的延迟天数
+isMfiBullSync = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1) > 0
+isMfiBearSync = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1) > 0
+isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0
+isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0
+
+// ==================== 6. 绘图与分级验证呈现 ====================
+// --- RSI 显示 ---
+plotshape(plotBull and rsiBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotBull and rsiBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI底", text = " RSI底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotHiddenBull and rsiHidBullAlert and isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏底", text = " RSI+MFI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotHiddenBull and rsiHidBullAlert and not isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏底", text = " RSI隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 60), textcolor = textColor, size = size.small)
+
+plotshape(plotBear and rsiBearAlert and isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI顶", text = " RSI+MFI顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotBear and rsiBearAlert and not isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI顶", text = " RSI顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏顶", text = " RSI+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏顶", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
+
+// --- MACD (Hist) 显示 ---
+plotshape(plotMacdBull and macdBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI底", text = " Hist+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotMacdBull and macdBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotMacdHiddenBull and macdHidBullAlert and isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI隐藏底", text = " Hist+MFI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotMacdHiddenBull and macdHidBullAlert and not isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotMacdBear and macdBearAlert and isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI顶", text = " Hist+MFI顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotMacdBear and macdBearAlert and not isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotMacdHiddenBear and macdHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI隐藏顶", text = " Hist+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotMacdHiddenBear and macdHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
+
+// ==================== 7. 辅助绘图 ===================
 plot(showAtr ? normalizedAtr : na, title="ATR 波动率", style=plot.style_columns, color=atrColor)
-
 hline(50, title="中轴线", color=#787B86, linestyle=hline.style_dotted)
-// 修复点 1：将硬编码替换为用户参数
 obLevel = hline(rsiOverbought, title="超买线", color=#787B86, linestyle=hline.style_dotted)
 osLevel = hline(rsiOversold, title="超卖线", color=#787B86, linestyle=hline.style_dotted)
 fill(obLevel, osLevel, title="背景填充", color=color.rgb(33, 149, 243, 85))
@@ -71,88 +139,8 @@ fill(obLevel, osLevel, title="背景填充", color=color.rgb(33, 149, 243, 85))
 rsiColor = osc >= rsiOverbought ? bearColor : osc <= rsiOversold ? bullColor : #2962FF
 plot(osc, title="RSI", linewidth=2, color=rsiColor)
 
-// ==================== 枢轴点检测 ====================
-// RSI 枢轴点
-plFound = not na(ta.pivotlow(osc, lbL, lbR))
-phFound = not na(ta.pivothigh(osc, lbL, lbR))
-
-// 修复点 2：独立计算 MACD 的枢轴点，确保 MACD 背离逻辑的严谨性
-macdPlFound = not na(ta.pivotlow(macdLine, lbL, lbR))
-macdPhFound = not na(ta.pivothigh(macdLine, lbL, lbR))
-
-_inRange(cond) =>
-    bars = ta.barssince(cond == true)
-    rangeLower <= bars and bars <= rangeUpper
-
-//------------------------------------------------------------------------------
-// RSI 背离逻辑 (基于 RSI 枢轴点)
-inRangePl = _inRange(plFound[1])
-oscHL = osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and inRangePl
-priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
-
-bullCondAlert = priceLL and oscHL and plFound
-bullCond = plotBull and bullCondAlert
-plot(plFound ? osc[lbR] : na, offset = -lbR, title = "常规看涨背离 RSI", linewidth = 2, color = bullCond ? bullColor : noneColor, display = display.pane)
-plotshape(bullCond ? osc[lbR] : na, offset = -lbR, title = "常规看涨背离标签 RSI", text = " RSI底背离 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.small)
-
-oscLL = osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and inRangePl
-priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
-hiddenBullCondAlert = priceHL and oscLL and plFound
-hiddenBullCond = plotHiddenBull and hiddenBullCondAlert
-plot(plFound ? osc[lbR] : na, offset = -lbR, title = "隐藏看涨背离 RSI", linewidth = 2, color = hiddenBullCond ? hiddenBullColor : noneColor, display = display.pane)
-plotshape(hiddenBullCond ? osc[lbR] : na, offset = -lbR, title = "隐藏看涨背离标签 RSI", text = " RSI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.small)
-
-inRangePh = _inRange(phFound[1])
-oscLH = osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and inRangePh
-priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
-bearCondAlert = priceHH and oscLH and phFound
-bearCond = plotBear and bearCondAlert
-plot(phFound ? osc[lbR] : na, offset = -lbR, title = "常规看跌背离 RSI", linewidth = 2, color = bearCond ? bearColor : noneColor, display = display.pane)
-plotshape(bearCond ? osc[lbR] : na, offset = -lbR, title = "常规看跌背离标签 RSI", text = " RSI顶背离 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.small)
-
-oscHH = osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and inRangePh
-priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
-hiddenBearCondAlert = priceLH and oscHH and phFound
-hiddenBearCond = plotHiddenBear and hiddenBearCondAlert
-plot(phFound ? osc[lbR] : na, offset = -lbR, title = "隐藏看跌背离 RSI", linewidth = 2, color = hiddenBearCond ? hiddenBearColor : noneColor, display = display.pane)
-plotshape(hiddenBearCond ? osc[lbR] : na, offset = -lbR, title = "隐藏看跌背离标签 RSI", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.small)
-
-//------------------------------------------------------------------------------
-// MACD 背离逻辑 (基于 MACD 独立枢轴点)
-inRangeMacdPl = _inRange(macdPlFound[1])
-inRangeMacdPh = _inRange(macdPhFound[1])
-
-macdHL = macdLine[lbR] > ta.valuewhen(macdPlFound, macdLine[lbR], 1) and inRangeMacdPl
-macdPriceLL = low[lbR] < ta.valuewhen(macdPlFound, low[lbR], 1)
-bullMacdCondAlert = macdPriceLL and macdHL and macdPlFound
-bullMacdCond = plotMacdBull and bullMacdCondAlert
-plotshape(bullMacdCond ? osc[lbR] : na, offset = -lbR, title = "MACD底背离标签", text = " MACD底背离 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.small)
-
-macdLL = macdLine[lbR] < ta.valuewhen(macdPlFound, macdLine[lbR], 1) and inRangeMacdPl
-macdPriceHL = low[lbR] > ta.valuewhen(macdPlFound, low[lbR], 1)
-hiddenBullMacdCondAlert = macdPriceHL and macdLL and macdPlFound
-hiddenBullMacdCond = plotMacdHiddenBull and hiddenBullMacdCondAlert
-plotshape(hiddenBullMacdCond ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏底背离标签", text = " MACD隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.small)
-
-macdLH = macdLine[lbR] < ta.valuewhen(macdPhFound, macdLine[lbR], 1) and inRangeMacdPh
-macdPriceHH = high[lbR] > ta.valuewhen(macdPhFound, high[lbR], 1)
-bearMacdCondAlert = macdPriceHH and macdLH and macdPhFound
-bearMacdCond = plotMacdBear and bearMacdCondAlert
-plotshape(bearMacdCond ? osc[lbR] : na, offset = -lbR, title = "MACD顶背离标签", text = " MACD顶背离 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.small)
-
-macdHH = macdLine[lbR] > ta.valuewhen(macdPhFound, macdLine[lbR], 1) and inRangeMacdPh
-macdPriceLH = high[lbR] < ta.valuewhen(macdPhFound, high[lbR], 1)
-hiddenBearMacdCondAlert = macdPriceLH and macdHH and macdPhFound
-hiddenBearMacdCond = plotMacdHiddenBear and hiddenBearMacdCondAlert
-plotshape(hiddenBearMacdCond ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏顶背离标签", text = " MACD隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.small)
-
-// ==================== 警报条件 ====================
-alertcondition(bullCondAlert, title='常规看涨背离 RSI', message="检测到新的常规看涨背离 RSI")
-alertcondition(hiddenBullCondAlert, title='隐藏看涨背离 RSI', message="检测到新的隐藏看涨背离 RSI")
-alertcondition(bearCondAlert, title='常规看跌背离 RSI', message="检测到新的常规看跌背离 RSI")
-alertcondition(hiddenBearCondAlert, title='隐藏看跌背离 RSI', message="检测到新的隐藏看跌背离 RSI")
-
-alertcondition(bullMacdCondAlert, title='常规看涨背离 MACD', message="检测到新的常规看涨背离 MACD")
-alertcondition(hiddenBullMacdCondAlert, title='隐藏看涨背离 MACD', message="检测到新的隐藏看涨背离 MACD")
-alertcondition(bearMacdCondAlert, title='常规看跌背离 MACD', message="检测到新的常规看跌背离 MACD")
-alertcondition(hiddenBearMacdCondAlert, title='隐藏看跌背离 MACD', message="检测到新的隐藏看跌背离 MACD")
+// ==================== 8. 警报条件 ====================
+alertcondition(rsiBullAlert, "RSI 底背离", "检测到 RSI 底背离")
+alertcondition(rsiBearAlert, "RSI 顶背离", "检测到 RSI 顶背离")
+alertcondition(macdBullAlert, "MACD Hist 底背离", "检测到 MACD Histogram 底背离")
+alertcondition(macdBearAlert, "MACD Hist 顶背离", "检测到 MACD Histogram 顶背离")
