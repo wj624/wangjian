@@ -42,7 +42,7 @@ cciExtremeOS = input.int(-200, "CCI 极端超卖警戒线", group="7. CCI 极端
 
 // ==================== 8. 视觉报警控制台 ====================
 showTier1 = input.bool(true, "【显示】梯队 1：强力共振 (深色大标签)", group="8. 视觉报警控制台 (附图开关)", tooltip="显示胜率最高的 RSI+MFI 或 Hist+MFI 同步共振信号")
-showTier2 = input.bool(false, "【显示】梯队 2：独立动能背离 (浅色小标签)", group="8. 视觉报警控制台 (附图开关)", tooltip="显示只有价格动能衰竭，但没有资金流配合的弱信号")
+showTier2 = input.bool(true, "【显示】梯队 2：独立动能背离 (浅色小标签)", group="8. 视觉报警控制台 (附图开关)", tooltip="显示只有价格动能衰竭，但没有资金流配合的弱信号")
 showTier3 = input.bool(true, "【显示】梯队 3：纯资金流潜伏 (MFI背离)", group="8. 视觉报警控制台 (附图开关)", tooltip="显示价格还没见底，但资金已经提前流入(MFI背离)的异动信号")
 showTier4 = input.bool(true, "【显示】梯队 4：CCI 均值回归 (紫红三角)", group="8. 视觉报警控制台 (附图开关)", tooltip="显示价格偏离均值达到物理极限的警告")
 
@@ -70,6 +70,7 @@ atrColor = atrPercent >= 80 ? color.new(color.orange, 60) : atrPercent <= 20 ? c
 plFound = not na(ta.pivotlow(osc, lbL, lbR))
 phFound = not na(ta.pivothigh(osc, lbL, lbR))
 
+// 依然保留 MACD 历史枢轴点的提取，作为比较的“过去锚点”
 macdPlFound = not na(ta.pivotlow(macdHist, lbL, lbR))
 macdPhFound = not na(ta.pivothigh(macdHist, lbL, lbR))
 
@@ -82,30 +83,49 @@ _inRange(cond) =>
 
 inRangePl = _inRange(plFound)
 inRangePh = _inRange(phFound)
-inRangeMacdPl = _inRange(macdPlFound)
-inRangeMacdPh = _inRange(macdPhFound)
 inRangeMfiPl = _inRange(mfiPlFound)
 inRangeMfiPh = _inRange(mfiPhFound)
 
 // ==================== 指标独立背离状态提取 ====================
-// --- MFI 资金动向 ---
+// --- MFI 资金动向 (保留 5 根 K 线确认) ---
 mfiBullAlert = low[lbR] < ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
 mfiBearAlert = high[lbR] > ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
 mfiHidBullAlert = low[lbR] > ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
 mfiHidBearAlert = high[lbR] < ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
 
-// --- RSI 价格动能 ---
+// --- RSI 价格动能 (保留 5 根 K 线确认) ---
 rsiBullAlert = low[lbR] < ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
 rsiBearAlert = high[lbR] > ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
 rsiHidBullAlert = low[lbR] > ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
 rsiHidBearAlert = high[lbR] < ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
 
-// --- MACD(Hist) 砸盘加速度 ---
-macdBullAlert = low[lbR] < ta.valuewhen(macdPlFound, low[lbR], 1) and macdHist[lbR] > ta.valuewhen(macdPlFound, macdHist[lbR], 1) and macdPlFound and inRangeMacdPl
-macdBearAlert = high[lbR] > ta.valuewhen(macdPhFound, high[lbR], 1) and macdHist[lbR] < ta.valuewhen(macdPhFound, macdHist[lbR], 1) and macdPhFound and inRangeMacdPh
-macdHidBullAlert = low[lbR] > ta.valuewhen(macdPlFound, low[lbR], 1) and macdHist[lbR] < ta.valuewhen(macdPlFound, macdHist[lbR], 1) and macdPlFound and inRangeMacdPl
-// 【修复核心 BUG】：修改为 inRangeMacdPh
-macdHidBearAlert = high[lbR] < ta.valuewhen(macdPhFound, high[lbR], 1) and macdHist[lbR] > ta.valuewhen(macdPhFound, macdHist[lbR], 1) and macdPhFound and inRangeMacdPh
+// --- MACD(Hist) 砸盘加速度 (【实时化改造】：0延迟，不再等 5 根 K 线) ---
+// 捕捉当根K线的实时柱子拐头动作
+macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
+macdTurnDown = macdHist < macdHist[1] and macdHist[1] > macdHist[2]
+
+// 提取上一根 K 线的极值（因为拐头确认后，真正的底/顶是在上一根）
+currMacdLow = low[1]
+currMacdHistLow = macdHist[1]
+currMacdHigh = high[1]
+currMacdHistHigh = macdHist[1]
+
+// 提取上一次历史确认的 5根K线大底/顶 作为参考系
+prevMacdPlLow = ta.valuewhen(macdPlFound, low[lbR], 0)
+prevMacdPlHist = ta.valuewhen(macdPlFound, macdHist[lbR], 0)
+prevMacdPhHigh = ta.valuewhen(macdPhFound, high[lbR], 0)
+prevMacdPhHist = ta.valuewhen(macdPhFound, macdHist[lbR], 0)
+
+distMacdPlAgg = ta.barssince(macdPlFound) + lbR
+inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
+
+distMacdPhAgg = ta.barssince(macdPhFound) + lbR
+inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
+
+macdBullAlert = macdTurnUp and currMacdLow < prevMacdPlLow and currMacdHistLow > prevMacdPlHist and inRangeMacdPlAgg and currMacdHistLow < 0
+macdBearAlert = macdTurnDown and currMacdHigh > prevMacdPhHigh and currMacdHistHigh < prevMacdPhHist and inRangeMacdPhAgg and currMacdHistHigh > 0
+macdHidBullAlert = macdTurnUp and currMacdLow > prevMacdPlLow and currMacdHistLow < prevMacdPlHist and inRangeMacdPlAgg and currMacdHistLow < 0
+macdHidBearAlert = macdTurnDown and currMacdHigh < prevMacdPhHigh and currMacdHistHigh > prevMacdPhHist and inRangeMacdPhAgg and currMacdHistHigh > 0
 
 // ==================== 安全滑窗过滤 ====================
 isMfiBullSync = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1) > 0
@@ -113,9 +133,9 @@ isMfiBearSync = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1) > 0
 isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0
 isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0
 
-// ==================== 视觉引擎：绘图与标签 (接入面板开关) ====================
+// ==================== 视觉引擎：绘图与标签 ====================
 
-// --- 梯队 1 & 2：RSI 显示 ---
+// --- 梯队 1 & 2：RSI 显示 (维持原版延迟 5 根结构) ---
 plotshape(showTier1 and plotBull and rsiBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
 plotshape(showTier2 and plotBull and rsiBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI底", text = " RSI底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
 
@@ -128,18 +148,13 @@ plotshape(showTier2 and plotBear and rsiBearAlert and not isMfiBearSync ? osc[lb
 plotshape(showTier1 and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏顶", text = " RSI+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
 plotshape(showTier2 and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏顶", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
 
-// --- 梯队 1 & 2：MACD (Hist) 显示 ---
-plotshape(showTier1 and plotMacdBull and macdBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI底", text = " Hist+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
-plotshape(showTier2 and plotMacdBull and macdBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+// --- 梯队：MACD (Hist) 实时先锋显示 ---
+// 注意：坐标被强制对齐到 osc[1] (昨天)，偏移量为 -1 (实时指引昨天最深那根针)
+plotshape(showTier2 and plotMacdBull and macdBullAlert ? osc[1] : na, offset = -1, title = "MACD实时底", text = " 实时Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(showTier2 and plotMacdHiddenBull and macdHidBullAlert ? osc[1] : na, offset = -1, title = "MACD实时隐藏底", text = " 实时Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(showTier2 and plotMacdBear and macdBearAlert ? osc[1] : na, offset = -1, title = "MACD实时顶", text = " 实时Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 20), textcolor = textColor, size = size.small)
+plotshape(showTier2 and plotMacdHiddenBear and macdHidBearAlert ? osc[1] : na, offset = -1, title = "MACD实时隐藏顶", text = " 实时Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 30), textcolor = textColor, size = size.small)
 
-plotshape(showTier1 and plotMacdHiddenBull and macdHidBullAlert and isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI隐藏底", text = " Hist+MFI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
-plotshape(showTier2 and plotMacdHiddenBull and macdHidBullAlert and not isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
-
-plotshape(showTier1 and plotMacdBear and macdBearAlert and isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI顶", text = " Hist+MFI顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
-plotshape(showTier2 and plotMacdBear and macdBearAlert and not isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 50), textcolor = textColor, size = size.small)
-
-plotshape(showTier1 and plotMacdHiddenBear and macdHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD+MFI隐藏顶", text = " Hist+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
-plotshape(showTier2 and plotMacdHiddenBear and macdHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
 
 // --- 梯队 3：纯 MFI 资金流显示 ---
 mfiPureBull = mfiBullAlert and not rsiBullAlert and not macdBullAlert
@@ -167,10 +182,15 @@ rsiColor = osc >= rsiOverbought ? bearColor : osc <= rsiOversold ? bullColor : #
 plot(osc, title="RSI", linewidth=2, color=rsiColor)
 
 // ==================== 实盘报警库 ====================
+// --- 实时独立播报 ---
+alertcondition(macdBullAlert, "【先锋实时】Hist 底背离", "动能衰竭 (0延迟抓点)！")
+alertcondition(macdBearAlert, "【先锋实时】Hist 顶背离", "动能衰竭 (0延迟抓点)！")
+alertcondition(macdHidBullAlert, "【先锋实时】Hist 隐藏底背离", "动能衰竭 (0延迟抓点)！")
+alertcondition(macdHidBearAlert, "【先锋实时】Hist 隐藏顶背离", "动能衰竭 (0延迟抓点)！")
+
+// --- 延后结构播报 ---
 alertcondition(rsiBullAlert and isMfiBullSync, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
 alertcondition(rsiBearAlert and isMfiBearSync, "【梯队1】RSI + MFI 共振顶", "强烈看跌！")
-alertcondition(macdBullAlert and isMfiBullSync, "【梯队1】Hist + MFI 共振底", "强烈看涨！")
-alertcondition(macdBearAlert and isMfiBearSync, "【梯队1】Hist + MFI 共振顶", "强烈看跌！")
 
 alertcondition(rsiBullAlert, "【梯队2】RSI 独立底背离", "动能衰竭")
 alertcondition(rsiBearAlert, "【梯队2】RSI 独立顶背离", "动能衰竭")
