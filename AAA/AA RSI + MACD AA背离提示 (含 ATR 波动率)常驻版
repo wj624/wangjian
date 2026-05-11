@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (视觉面板版)", shorttitle="RSI+Hist+MFI+CCI", format=format.price, timeframe="", timeframe_gaps=true)
+indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 正式版", shorttitle="RSI+Hist+MFI+CCI", format=format.price, timeframe="", timeframe_gaps=true)
 
 // ==================== 1. 基础输入参数 ====================
 len = input.int(14, "RSI 周期", minval=1, group="1. RSI 参数设置")
