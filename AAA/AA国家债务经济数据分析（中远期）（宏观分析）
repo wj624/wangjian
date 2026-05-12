@@ -134,7 +134,7 @@ c_inactive  = color.new(#555555, 0)
 // ── 核心逻辑 ──
 grp_logic = "核心逻辑选择"
 calc_mode = input.string(
-     "模式A：名义GDP增长率减去10年国债收益率，越高越好", "计算模式（选项对利息压力指标及背景有用）",
+     "模式A：名义GDP增长率减去10年国债收益率，越高越好", "计算模式（选项对利息压力指标及背景有用，模式A：（动能与造血能力，小于0不可持续）模式B：（底线与存量压力）",
      options=["模式A：名义GDP增长率减去10年国债收益率，越高越好",
               "模式B：债务占GDP比例乘以10年国债收益率（代理利息负担），越低越好"],
      group=grp_logic)
@@ -685,7 +685,7 @@ bgcolor(valid_time and state_id == "A3b" ? color.new(#ffbb00, 50)  : na,  title=
 
 // 全局宏观风险背景（V26）
 bg_color = is_urgent ? color.new(color.red, 88) : is_warning ? color.new(color.orange, 92) : na
-bgcolor(bg_color, title="宏观风险背景（4国综合）")
+bgcolor(bg_color, title="宏观风险背景（4国综合）其他背景颜色都是各自国家")
 
 
 // ==========================================
