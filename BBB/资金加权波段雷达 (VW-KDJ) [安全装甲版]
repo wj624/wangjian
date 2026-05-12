@@ -1,0 +1,67 @@
+//@version=6
+indicator("资金加权波段雷达 (VW-KDJ) [安全装甲版]", shorttitle="VW-KDJ", overlay=false)
+
+// ==================== 1. 参数设置 ====================
+GRP_CORE = "核心参数 (周期与平滑)"
+lookback = input.int(36, "极值回溯周期 (N)", minval=1, group=GRP_CORE)
+smooth1  = input.int(3, "资金平滑 1 (M1)", minval=1, group=GRP_CORE)
+smooth2  = input.int(3, "资金平滑 2 (波 M2)", minval=1, group=GRP_CORE)
+smooth3  = input.int(3, "资金平滑 3 (段 M3)", minval=1, group=GRP_CORE)
+
+GRP_LEVELS = "极值触发阈值"
+obLevel = input.int(80, "超买警戒线 (可适当下调至75)", minval=50, maxval=100, group=GRP_LEVELS)
+osLevel = input.int(20, "超卖警戒线 (可适当上调至25)", minval=0, maxval=50, group=GRP_LEVELS)
+
+GRP_FILTER = "防骗线设置"
+useVwmaSrc = input.bool(true, "源数据使用3日资金均价", group=GRP_FILTER, tooltip="开启后，计算RSV的基础价格将采用3日加权价，有效屏蔽主力尾盘微量画线骗局。")
+
+// ==================== 2. 自适应资金装甲 (防无量崩溃) ====================
+// 提取安全的成交量：如果无成交量(na或0)，则默认权重为1(自动降级为SMA)
+safeVol = na(volume) or volume == 0 ? 1 : volume
+
+// 自定义安全的 VWMA 函数
+custom_vwma(src, len) =>
+    math.sum(src * safeVol, len) / math.max(math.sum(safeVol, len), 1e-10)
+
+// ==================== 3. 核心算法 ====================
+// 判定源数据
+src = useVwmaSrc ? custom_vwma(close, 3) : close
+
+// 计算基础 RSV
+hh = ta.highest(high, lookback)
+ll = ta.lowest(low, lookback)
+rsv = (src - ll) / math.max(hh - ll, 1e-10) * 100
+
+// 三重资金加权平滑 (调用安全的 custom_vwma)
+var2 = custom_vwma(rsv, smooth1)
+var3 = custom_vwma(var2, smooth2)  // 波 (资金活跃线)
+var4 = custom_vwma(var3, smooth3)  // 段 (资金基准线)
+
+// ==================== 4. 视觉渲染 ====================
+plot(var3, color=color.rgb(0, 213, 255), linewidth=2, title="波")
+plot(var4, color=color.rgb(255, 152, 0), linewidth=2, title="段")
+
+hline(obLevel, "超买警戒", color=color.new(color.red, 50), linestyle=hline.style_dotted)
+hline(50, "多空分界", color=color.new(color.gray, 50), linestyle=hline.style_dashed)
+hline(osLevel, "超卖警戒", color=color.new(color.green, 50), linestyle=hline.style_dotted)
+
+hOB = hline(obLevel, display=display.none)
+h100 = hline(100, display=display.none)
+hOS = hline(osLevel, display=display.none)
+h0 = hline(0, display=display.none)
+fill(hOB, h100, color=color.new(color.red, 90), title="超买区背景")
+fill(h0, hOS, color=color.new(color.green, 90), title="超卖区背景")
+
+// ==================== 5. 信号触发逻辑 (修复不对称性) ====================
+// 抄底：波上穿段，且【交叉前】处于超卖区
+buyCond = ta.crossover(var3, var4) and var3[1] < osLevel
+// 逃顶：波下穿段，且【交叉前】处于超买区
+sellCond = ta.crossunder(var3, var4) and var3[1] > obLevel
+
+// 干净的标签提示 (移除多余背景色，保持盘面整洁)
+plotshape(buyCond, title="抄底标签", text="抄底", style=shape.triangleup, location=location.bottom, color=color.green, textcolor=color.green, size=size.small)
+plotshape(sellCond, title="逃顶标签", text="逃顶", style=shape.triangledown, location=location.top, color=color.red, textcolor=color.red, size=size.small)
+
+// ==================== 6. 报警库 ====================
+alertcondition(buyCond, title="【资金波段】抄底信号", message="波段极值低位 + 资金爆量拐头，抄底！")
+alertcondition(sellCond, title="【资金波段】逃顶信号", message="波段极值高位 + 资金撤退拐头，逃顶！") 
