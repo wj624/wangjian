@@ -1,5 +1,5 @@
 //@version=6
-indicator("债务经济数据分析（中远期）最终版2", shorttitle="债务经济数据分析（中远期）最终版2", overlay=false, max_lines_count=500, max_labels_count=500)
+indicator("国家债务经济数据分析（中远期）最终版", shorttitle="国家债务经济数据分析（中远期）最终版", overlay=false, max_lines_count=500, max_labels_count=500)
 
 // ==========================================
 // 1. 公共函数
@@ -134,7 +134,7 @@ c_inactive  = color.new(#555555, 0)
 // ── 核心逻辑 ──
 grp_logic = "核心逻辑选择"
 calc_mode = input.string(
-     "模式A：名义GDP增长率减去10年国债收益率，越高越好", "计算模式",
+     "模式A：名义GDP增长率减去10年国债收益率，越高越好", "计算模式（选项对利息压力指标及背景有用）",
      options=["模式A：名义GDP增长率减去10年国债收益率，越高越好",
               "模式B：债务占GDP比例乘以10年国债收益率（代理利息负担），越低越好"],
      group=grp_logic)
