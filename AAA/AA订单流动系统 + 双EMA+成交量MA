@@ -1,0 +1,432 @@
+//@version=6
+indicator("订单流动系统 + 双EMA+成交量MA", overlay = true, max_labels_count = 500, max_boxes_count = 500, calc_bars_count = 2000, max_bars_back = 5000)
+
+// INPUTS ---------------------------------------------------------------------
+
+swingLen = input.int(50, "波段长度 | Swing Length", minval = 10)
+
+swingColorUp = input.color(color.lime, "上涨颜色 | ▲", inline = "colors")
+swingColorDown = input.color(color.orange, "下跌颜色 | ▼", inline = "colors")
+
+showProfile = input.bool(true, "显示分布图 | Profile", group = "波段成交量分布 | Swing Volume Profile")
+showHeatMap = input.bool(false, "显示热力图 | HeatMap", group = "波段成交量分布 | Swing Volume Profile")
+
+showZigZag = input.bool(false, "显示折线 | ZigZag", inline = "Zz")
+zigZagStyleInput = input.string("Dotted", "样式 | Style", ["Dotted", "Dashed", "Solid"], inline = "Zz")
+
+showPOC = input.bool(true, "显示控制点 | PoC", "", inline = "Poc", group = "控制点 | Point of Control")
+pocWidthInput = input.int(2, "粗细 | Width", inline = "Poc", group = "控制点 | Point of Control")
+pocColor = input.color(color.red, "颜色 | Color", inline = "Poc", group = "控制点 | Point of Control")
+
+transparentNA = color.new(color.black, 100)
+
+string dataSizeInput = input.string("Small", title = "文字大小 | Data Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"])
+
+// Size switcher for labels
+getLabelSize() =>
+    switch dataSizeInput
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.tiny
+
+getZigZagLineStyle() =>
+    switch zigZagStyleInput
+        "Dotted" => line.style_dotted
+        "Dashed" => line.style_dashed
+        "Solid"  => line.style_solid
+
+
+// Persistent storage containers
+var polyline profilePoly = na
+var dataLabel = label(na)
+var pocLineHandle = line(na)
+var profileBoxes = array.new<box>()
+
+// Structs for swing points
+type SwingData
+    float price
+    int index
+
+var highSwing = SwingData.new(na, na)
+var lowSwing  = SwingData.new(na, na)
+
+// Direction flag: true = down move, false = up move
+var isDownMove = false
+
+// CALCULATIONS ---------------------------------------------------------------
+
+// Detect swing highs and lows
+highestSwingHigh = ta.highest(swingLen)
+lowestSwingLow   = ta.lowest(swingLen)
+
+if high == highestSwingHigh
+    isDownMove := true
+if low == lowestSwingLow
+    isDownMove := false
+
+// Store completed swing high
+if high[1] == highestSwingHigh[1] and high < highestSwingHigh
+    highSwing.index := bar_index[1]
+    highSwing.price := high[1]
+
+// Store completed swing low
+if low[1] == lowestSwingLow[1] and low > lowestSwingLow
+    lowSwing.index := bar_index[1]
+    lowSwing.price := low[1]
+
+// Default bin size based on ATR
+priceBinSize = ta.atr(200) * 0.5
+
+// ────────────────────────────────────────
+// 【新增】双 EMA 均线（放在计算区末尾，不会干扰原有逻辑）
+// ────────────────────────────────────────
+group_ema = "双EMA 均线"
+ema_fast_len = input.int(50,   "快EMA 周期", minval=1, group=group_ema)
+ema_slow_len = input.int(200,  "慢EMA 周期", minval=1, group=group_ema)
+show_fast_ema = input.bool(true, "显示快EMA", inline="ema_show", group=group_ema)
+show_slow_ema = input.bool(true, "显示慢EMA", inline="ema_show", group=group_ema)
+ema_color_fast = input.color(color.rgb(0, 213, 255),  "快EMA 颜色", inline="ema_color", group=group_ema)
+ema_color_slow = input.color(color.rgb(230, 180, 0), "慢EMA 颜色", inline="ema_color", group=group_ema)
+
+fastEMA = ta.ema(close, ema_fast_len)
+slowEMA = ta.ema(close, ema_slow_len)
+
+plot(show_fast_ema ? fastEMA : na, "快EMA", color=ema_color_fast, linewidth=2)
+plot(show_slow_ema ? slowEMA : na, "慢EMA", color=ema_color_slow, linewidth=2)
+
+// ────────────────────────────────────────
+// HISTORICAL SWING LEG -------------------------------------------------------
+
+// When direction flips we finalize previous swing leg and build full profile
+if isDownMove != isDownMove[1]
+
+    // Clear previous drawings
+    profilePoly.delete()
+    dataLabel.delete()
+    for b in profileBoxes
+        b.delete()
+    profileBoxes.clear()
+
+    swingMainColor = isDownMove ? swingColorDown : swingColorUp
+
+    // Draw zigzag connector
+    if showZigZag
+        line.new(highSwing.index, highSwing.price, lowSwing.index, lowSwing.price, color = swingMainColor, style = getZigZagLineStyle())
+
+    // Determine swing boundaries
+    swingBottom = math.min(highSwing.price, lowSwing.price)
+    swingTop    = math.max(highSwing.price, lowSwing.price)
+
+    // Number of volume bins
+    binCount = int(math.abs(highSwing.price - lowSwing.price) / priceBinSize)
+    binStep  = math.abs(highSwing.price - lowSwing.price) / binCount
+
+    lastSwingIndex = math.max(highSwing.index, lowSwing.index)
+    prevSwingIndex = math.min(highSwing.index, lowSwing.index)
+
+    // Arrays for volume accumulation
+    volumeBins = array.new<float>(binCount, 0.)
+    profilePoints = array.new<chart.point>()
+    buyVolumeBins = array.new<float>(binCount, 0.)
+    sellVolumeBins = array.new<float>(binCount, 0.)
+
+    barOffset = bar_index - lastSwingIndex
+
+    // Accumulate volume per price bin
+    for i = barOffset to (lastSwingIndex - prevSwingIndex) + barOffset
+
+        candleClose = close[i]
+        candleOpen  = open[i]
+        candleVol   = volume[i]
+
+        for k = 0 to binCount - 1
+            binMidPrice = swingBottom + (k * binStep) + (binStep / 2)
+
+            if math.abs(binMidPrice - candleClose) < binStep
+
+                volumeBins.set(k, volumeBins.get(k) + candleVol)
+
+                if candleClose > candleOpen
+                    buyVolumeBins.set(k, buyVolumeBins.get(k) + candleVol)
+                else
+                    sellVolumeBins.set(k, sellVolumeBins.get(k) + candleVol)
+
+    // Draw boxes and build profile outline
+    for k = 0 to binCount - 1
+
+        binLow  = swingBottom + (k * binStep)
+        binHigh = binLow + binStep
+
+        volumeRatio = volumeBins.get(k) / volumeBins.max()
+        profileWidth = int(volumeRatio * ((lastSwingIndex - prevSwingIndex) / 2))
+
+        // Draw POC line
+        if volumeRatio == 1 and showPOC
+            line.new(showProfile ? prevSwingIndex + profileWidth : prevSwingIndex, math.avg(binLow, binHigh), lastSwingIndex, math.avg(binLow, binHigh), color = pocColor, width = pocWidthInput)
+
+        // Create volume box
+        box.new(
+            showProfile ? prevSwingIndex + profileWidth : prevSwingIndex,
+            binHigh,
+            showHeatMap ? lastSwingIndex : prevSwingIndex,
+            binLow,
+            transparentNA,
+            0,
+            bgcolor = showProfile or showHeatMap ? color.from_gradient(volumeRatio, 0, 1, color.new(swingMainColor, 90), color.new(volumeRatio == 1 and showPOC ? pocColor : swingMainColor, 50)) : transparentNA,
+            text = showHeatMap ? "" : volumeRatio == 1 ? str.tostring(volumeBins.max(), format.volume) : ""
+        )
+
+        // Build polygon outline
+        if k == 0
+            profilePoints.push(chart.point.from_index(prevSwingIndex, binLow))
+        profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binLow))
+        profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binHigh))
+        if k == binCount - 1
+            profilePoints.push(chart.point.from_index(prevSwingIndex, binHigh))
+
+    // Draw outer polyline
+    if showProfile
+        polyline.new(profilePoints, false, true, line_color = showHeatMap ? color.new(swingMainColor, 50) : swingMainColor)
+
+    // Summary label for historical swing
+    swingArrowText = isDownMove ? "▼" : "▲"
+
+    swingTooltip =
+          "总成交量 | Total Volume: " + str.tostring(volumeBins.sum(), format.volume)
+         + "\n买入量 | Buy Volume: " + str.tostring(buyVolumeBins.sum(), format.volume)
+         + "\n卖出量 | Sell Volume: " + str.tostring(sellVolumeBins.sum(), format.volume)
+         + "\n成交量差 | Delta Volume: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent)
+
+    label.new(prevSwingIndex, isDownMove ? swingTop : swingBottom, swingArrowText,
+         style = isDownMove ? label.style_label_down : label.style_label_up,
+         color = transparentNA,
+         textcolor = swingMainColor,
+         size = getLabelSize(),
+         tooltip = swingTooltip)
+
+
+// REAL-TIME SWING LEG --------------------------------------------------------
+
+// Real-time profile rebuilding while swing is still forming
+if not isDownMove
+
+    // Clear boxes on every update
+    for b in profileBoxes
+        b.delete()
+    profileBoxes.clear()
+
+    if barstate.islast
+
+        swingMainColor = chart.fg_color
+
+        // Remove previous zigzag preview line
+        line.delete(line.new(highSwing.index, highSwing.price, lowSwing.index, lowSwing.price, color = swingMainColor, style = line.style_dashed)[1])
+
+        swingBottom = math.min(highSwing.price, lowSwing.price)
+        swingTop    = math.max(highSwing.price, lowSwing.price)
+
+        binCount = int(math.abs(highSwing.price - lowSwing.price) / priceBinSize)
+        binStep  = math.abs(highSwing.price - lowSwing.price) / binCount
+
+        lastSwingIndex = math.max(highSwing.index, lowSwing.index)
+        prevSwingIndex = math.min(highSwing.index, lowSwing.index)
+
+        volumeBins = array.new<float>(binCount, 0.)
+        profilePoints = array.new<chart.point>()
+        buyVolumeBins = array.new<float>(binCount, 0.)
+        sellVolumeBins = array.new<float>(binCount, 0.)
+
+        barOffset = bar_index - lastSwingIndex
+
+        // Accumulate volume in real time
+        for i = barOffset to (lastSwingIndex - prevSwingIndex) + barOffset
+
+            candleClose = close[i]
+            candleOpen  = open[i]
+            candleVol   = volume[i]
+
+            for k = 0 to binCount - 1
+                binMidPrice = swingBottom + (k * binStep) + (binStep / 2)
+
+                if math.abs(binMidPrice - candleClose) < binStep
+
+                    volumeBins.set(k, volumeBins.get(k) + candleVol)
+                    if candleClose > candleOpen
+                        buyVolumeBins.set(k, buyVolumeBins.get(k) + candleVol)
+                    else
+                        sellVolumeBins.set(k, sellVolumeBins.get(k) + candleVol)
+
+        // Draw real-time boxes
+        for k = 0 to binCount - 1
+
+            binLow  = swingBottom + (k * binStep)
+            binHigh = binLow + binStep
+
+            volumeRatio = volumeBins.get(k) / volumeBins.max()
+            profileWidth = int(volumeRatio * ((lastSwingIndex - prevSwingIndex) / 2))
+
+            if volumeRatio == 1 and showPOC
+                pocLineHandle := line.new(showProfile ? prevSwingIndex + profileWidth : prevSwingIndex, math.avg(binLow, binHigh), lastSwingIndex, math.avg(binLow, binHigh), color = pocColor, width = pocWidthInput)
+                line.delete(pocLineHandle[1])
+
+            profileBoxes.push(box.new(
+                 showProfile ? prevSwingIndex + profileWidth : prevSwingIndex,
+                 binHigh,
+                 showHeatMap ? lastSwingIndex : prevSwingIndex,
+                 binLow,
+                 transparentNA,
+                 0,
+                 bgcolor = showProfile or showHeatMap ? color.from_gradient(volumeRatio, 0, 1, color.new(swingMainColor, 90), color.new(volumeRatio == 1 and showPOC ? pocColor : swingMainColor, 50)) : transparentNA,
+                 text = showHeatMap ? "" : volumeRatio == 1 ? str.tostring(volumeBins.max(), format.volume) : ""
+            ))
+
+            if k == 0
+                profilePoints.push(chart.point.from_index(prevSwingIndex, binLow))
+            profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binLow))
+            profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binHigh))
+            if k == binCount - 1
+                profilePoints.push(chart.point.from_index(prevSwingIndex, binHigh))
+
+        // Update polyline in real time
+        if showProfile
+            polyline.delete(profilePoly[1])
+            profilePoly := polyline.new(profilePoints, false, true, line_color = showHeatMap ? color.new(swingMainColor, 50) : swingMainColor)
+
+        // Label with summary data
+        swingTooltip = "T - 总成交量 | Total Volume\nB - 买入量 | Buy Volume\nS - 卖出量 | Sell Volume\nD - 成交量差 | Delta Volume"
+
+        swingDataText =
+              "T: " + str.tostring(volumeBins.sum(), format.volume)
+             + "\nB: " + str.tostring(buyVolumeBins.sum(), format.volume)
+             + "\nS: " + str.tostring(sellVolumeBins.sum(), format.volume)
+             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent)
+
+        dataLabel := label.new(prevSwingIndex, not isDownMove ? swingTop : swingBottom, swingDataText,
+             style = not isDownMove ? label.style_label_down : label.style_label_up,
+             color = transparentNA,
+             textcolor = swingMainColor,
+             size = getLabelSize(),
+             tooltip = swingTooltip,
+             textalign = text.align_left)
+
+        label.delete(dataLabel[1])
+
+
+// MIRROR OF ABOVE FOR isDownMove == true ------------------------------------------
+
+else
+
+    for b in profileBoxes
+        b.delete()
+    profileBoxes.clear()
+
+    if barstate.islast
+
+        swingMainColor = chart.fg_color
+
+        line.delete(line.new(highSwing.index, highSwing.price, lowSwing.index, lowSwing.price, color = swingMainColor, style = line.style_dashed)[1])
+
+        swingBottom = math.min(highSwing.price, lowSwing.price)
+        swingTop    = math.max(highSwing.price, lowSwing.price)
+
+        binCount = int(math.abs(highSwing.price - lowSwing.price) / priceBinSize)
+        binStep  = math.abs(highSwing.price - lowSwing.price) / binCount
+
+        lastSwingIndex = math.max(highSwing.index, lowSwing.index)
+        prevSwingIndex = math.min(highSwing.index, lowSwing.index)
+
+        volumeBins = array.new<float>(binCount, 0.)
+        profilePoints = array.new<chart.point>()
+        buyVolumeBins = array.new<float>(binCount, 0.)
+        sellVolumeBins = array.new<float>(binCount, 0.)
+
+        barOffset = bar_index - lastSwingIndex
+
+        for i = barOffset to (lastSwingIndex - prevSwingIndex) + barOffset
+
+            candleClose = close[i]
+            candleOpen  = open[i]
+            candleVol   = volume[i]
+
+            for k = 0 to binCount - 1
+
+                binMidPrice = swingBottom + (k * binStep) + (binStep / 2)
+
+                if math.abs(binMidPrice - candleClose) < binStep
+
+                    volumeBins.set(k, volumeBins.get(k) + candleVol)
+                    if candleClose > candleOpen
+                        buyVolumeBins.set(k, buyVolumeBins.get(k) + candleVol)
+                    else
+                        sellVolumeBins.set(k, sellVolumeBins.get(k) + candleVol)
+
+        for k = 0 to binCount - 1
+
+            binLow  = swingBottom + (k * binStep)
+            binHigh = binLow + binStep
+
+            volumeRatio = volumeBins.get(k) / volumeBins.max()
+            profileWidth = int(volumeRatio * ((lastSwingIndex - prevSwingIndex) / 2))
+
+            if volumeRatio == 1 and showPOC
+                pocLineHandle := line.new(showProfile ? prevSwingIndex + profileWidth : prevSwingIndex, math.avg(binLow, binHigh), lastSwingIndex, math.avg(binLow, binHigh), color = pocColor, width = pocWidthInput)
+                line.delete(pocLineHandle[1])
+
+            profileBoxes.push(box.new(
+                  showProfile ? prevSwingIndex + profileWidth : prevSwingIndex,
+                  binHigh,
+                  showHeatMap ? lastSwingIndex : prevSwingIndex,
+                  binLow,
+                  transparentNA,
+                  0,
+                  bgcolor = showProfile or showHeatMap ? color.from_gradient(volumeRatio, 0, 1, color.new(swingMainColor, 90), color.new(volumeRatio == 1 and showPOC ? pocColor : swingMainColor, 50)) : transparentNA,
+                  text = showHeatMap ? "" : volumeRatio == 1 ? str.tostring(volumeBins.max(), format.volume) : ""
+              ))
+
+            if k == 0
+                profilePoints.push(chart.point.from_index(prevSwingIndex, binLow))
+            profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binLow))
+            profilePoints.push(chart.point.from_index(prevSwingIndex + profileWidth, binHigh))
+            if k == binCount - 1
+                profilePoints.push(chart.point.from_index(prevSwingIndex, binHigh))
+
+        if showProfile
+            polyline.delete(profilePoly[1])
+            profilePoly := polyline.new(profilePoints, false, true, line_color = showHeatMap ? color.new(swingMainColor, 50) : swingMainColor)
+
+        swingTooltip = "T - 总成交量 | Total Volume\nB - 买入量 | Buy Volume\nS - 卖出量 | Sell Volume\nD - 成交量差 | Delta Volume"
+
+        swingDataText =
+              "T: " + str.tostring(volumeBins.sum(), format.volume)
+             + "\nB: " + str.tostring(buyVolumeBins.sum(), format.volume)
+             + "\nS: " + str.tostring(sellVolumeBins.sum(), format.volume)
+             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent)
+
+        dataLabel := label.new(prevSwingIndex, not isDownMove ? swingTop : swingBottom, swingDataText,
+             style = not isDownMove ? label.style_label_down : label.style_label_up,
+             color = transparentNA,
+             textcolor = swingMainColor,
+             size = getLabelSize(),
+             tooltip = swingTooltip,
+             textalign = text.align_left)
+
+        label.delete(dataLabel[1])
+
+// Smoothing MA inputs （原有平滑 MA 部分保持不变）
+GRP = "移动平均线 | Moving Average"
+maTypeInput = input.string("VWMA", "类型 | Type", options = ["None", "SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP, display = display.none)
+maLengthInput = input.int(200, "长度 | Length", group = GRP, display = display.none, active = maTypeInput != "None")
+src = input(close, title="数据源 | Source", group = GRP, active = maTypeInput != "None")
+// 【新增】均线颜色可选项
+maColor        = input.color(color.rgb(255, 0, 0), "均线颜色 | MA Color", group = GRP)
+// Smoothing MA Calculation
+ma(source, length, MAtype) =>
+    switch MAtype
+        "SMA"                    => ta.sma(source, length)
+        "EMA"                    => ta.ema(source, length)
+        "SMMA (RMA)"             => ta.rma(source, length)
+        "WMA"                    => ta.wma(source, length)
+        "VWMA"                   => ta.vwma(source, length)
+plot(ma(src, maLengthInput, maTypeInput), color=maColor, title="均线 | MA")
