@@ -1,5 +1,5 @@
 //@version=6
-indicator("订单流动系统 + 双EMA+成交量MA", overlay = true, max_labels_count = 500, max_boxes_count = 500, calc_bars_count = 2000, max_bars_back = 5000)
+indicator("订单流动系统 + 双EMA", overlay = true, max_labels_count = 500, max_boxes_count = 500, calc_bars_count = 2000, max_bars_back = 5000)
 
 // INPUTS ---------------------------------------------------------------------
 
@@ -93,8 +93,9 @@ ema_color_slow = input.color(color.rgb(230, 180, 0), "慢EMA 颜色", inline="em
 fastEMA = ta.ema(close, ema_fast_len)
 slowEMA = ta.ema(close, ema_slow_len)
 
-plot(show_fast_ema ? fastEMA : na, "快EMA", color=ema_color_fast, linewidth=2)
-plot(show_slow_ema ? slowEMA : na, "慢EMA", color=ema_color_slow, linewidth=2)
+// 【代码绑定】将画线赋予变量，方便后续云图填充
+p_fastEMA = plot(show_fast_ema ? fastEMA : na, "快EMA", color=ema_color_fast, linewidth=2)
+p_slowEMA = plot(show_slow_ema ? slowEMA : na, "慢EMA", color=ema_color_slow, linewidth=2)
 
 // ────────────────────────────────────────
 // HISTORICAL SWING LEG -------------------------------------------------------
@@ -419,8 +420,8 @@ GRP = "移动平均线 | Moving Average"
 maTypeInput = input.string("VWMA", "类型 | Type", options = ["None", "SMA", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP, display = display.none)
 maLengthInput = input.int(200, "长度 | Length", group = GRP, display = display.none, active = maTypeInput != "None")
 src = input(close, title="数据源 | Source", group = GRP, active = maTypeInput != "None")
-// 【新增】均线颜色可选项
 maColor        = input.color(color.rgb(255, 0, 0), "均线颜色 | MA Color", group = GRP)
+
 // Smoothing MA Calculation
 ma(source, length, MAtype) =>
     switch MAtype
@@ -429,4 +430,25 @@ ma(source, length, MAtype) =>
         "SMMA (RMA)"             => ta.rma(source, length)
         "WMA"                    => ta.wma(source, length)
         "VWMA"                   => ta.vwma(source, length)
-plot(ma(src, maLengthInput, maTypeInput), color=maColor, title="均线 | MA")
+
+// 【代码绑定】计算 VWMA 并将其画线赋予变量
+dynMAVal = ma(src, maLengthInput, maTypeInput)
+p_vwma = plot(dynMAVal, color=maColor, title="均线 | MA")
+
+// ────────────────────────────────────────
+// 【终极新增】主图 量价趋势云图 (VWMA vs 慢EMA)
+// ────────────────────────────────────────
+grp_cloud = "量价趋势云图 (VWMA vs 慢EMA)"
+
+show_cloud = input.bool(true, "开启均线差值云图（默认EMA和VWMA是200日针对个股优势明显，养老金定投的类似标普500除外）", group=grp_cloud)
+cloud_transp = input.int(20, "云图透明度 (0-100)", minval=0, maxval=100, group=grp_cloud)
+
+// 在标题和提示信息中详细写入核心原理
+cloud_bull_color = input.color(color.green, "🟢 VWMA > EMA (主力吸筹/主升浪)", group=grp_cloud, tooltip="VWMA代表资金加权成本。当它高于纯价格均线EMA时，说明放量上涨/缩量下跌，大资金在主动买入，趋势极其扎实。")
+cloud_bear_color = input.color(color.red, "🔴 EMA > VWMA (主力派发/出货危险)", group=grp_cloud, tooltip="EMA高于VWMA，说明上涨无量/下跌放量。表面上价格在涨，但真实资金在悄悄撤退，存在极高的诱多风险。")
+
+// 逻辑计算与颜色分配
+fill_color = dynMAVal > slowEMA ? color.new(cloud_bull_color, cloud_transp) : dynMAVal < slowEMA ? color.new(cloud_bear_color, cloud_transp) : na
+
+// 执行填充
+fill(p_vwma, p_slowEMA, show_cloud ? fill_color : na, title="主力资金云图")
