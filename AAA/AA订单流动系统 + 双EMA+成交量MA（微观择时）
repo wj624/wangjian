@@ -20,7 +20,7 @@ pocColor = input.color(color.red, "颜色 | Color", inline = "Poc", group = "控
 
 transparentNA = color.new(color.black, 100)
 
-string dataSizeInput = input.string("Small", title = "文字大小 | Data Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"])
+string dataSizeInput = input.string("Normal", title = "文字大小 | Data Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"])
 
 // Size switcher for labels
 getLabelSize() =>
