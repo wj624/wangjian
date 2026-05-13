@@ -1,5 +1,5 @@
 //@version=6
-indicator("订单流动系统 + 云图版", overlay = true, max_labels_count = 500, max_boxes_count = 500, calc_bars_count = 2000, max_bars_back = 5000)
+indicator("订单流动系统 + 机构级三层云图", overlay = true, max_labels_count = 500, max_boxes_count = 500, calc_bars_count = 2000, max_bars_back = 5000)
 
 // INPUTS ---------------------------------------------------------------------
 
@@ -20,7 +20,7 @@ pocColor = input.color(color.red, "颜色 | Color", inline = "Poc", group = "控
 
 transparentNA = color.new(color.black, 100)
 
-string dataSizeInput = input.string("Normal", title = "文字大小 | Data Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"])
+string dataSizeInput = input.string("Small", title = "文字大小 | Data Size", options = ["Tiny", "Small", "Normal", "Large", "Huge"])
 
 // Size switcher for labels
 getLabelSize() =>
@@ -409,37 +409,116 @@ else
         label.delete(dataLabel[1])
 
 // ────────────────────────────────────────
-// 【量价趋势云图 (VWMA vs 慢SMA) 板块】
 // ────────────────────────────────────────
-grp_cloud = "量价趋势云图 (VWMA vs 慢SMA)"
+/// ────────────────────────────────────────
+// 【V1.5 终极进阶】环境状态机 (定向震荡 + HTF评分 + 优先级矩阵)
+// ────────────────────────────────────────
+grp_cloud = "环境状态机 (宏观/中观/微观)"
 
-show_cloud = input.bool(true, "开启均线差值云图 (建议参数: 60)", group=grp_cloud)
-cloud_transp = input.int(20, "云图透明度 (0-100)", minval=0, maxval=100, group=grp_cloud)
+show_cloud   = input.bool(true, "开启环境云图", group=grp_cloud)
 
-// 周期统一排在一行，方便对比调整
-sma_slow_len = input.int(60, "慢SMA 周期", minval=1, inline="c_len", group=grp_cloud)
-vwma_len     = input.int(60, "VWMA 周期",  minval=1, inline="c_len", group=grp_cloud)
+// ==========================================
+// 参数面板
+// ==========================================
+vwma_len     = input.int(20, "微观：资金波段 (VWMA)", minval=1, inline="c_len", group=grp_cloud)
+ema_slow_len = input.int(60, "中观：趋势地基 (EMA)", minval=1, inline="c_len", group=grp_cloud)
 
-// 开关及颜色统一排在一行
-show_slow_sma = input.bool(true, "显示慢SMA", inline="c_show", group=grp_cloud)
-show_vwma     = input.bool(true, "显示VWMA",  inline="c_show", group=grp_cloud)
-sma_color_slow = input.color(color.rgb(230, 180, 0), "慢SMA颜色", inline="c_color", group=grp_cloud)
-vwma_color     = input.color(color.rgb(255, 0, 0),   "VWMA颜色",  inline="c_color", group=grp_cloud)
+use_adx      = input.bool(true, "开启中观 ADX 过滤", group=grp_cloud)
+adx_thresh   = input.int(20, "ADX 震荡阈值", minval=10, maxval=30, group=grp_cloud)
 
-// 云图逻辑说明
-cloud_bull_color = input.color(color.green, "🟢 VWMA > SMA (量价共振增强)", group=grp_cloud, tooltip="VWMA 代表成交量加权平均价格。当 VWMA 高于 SMA 时，说明近期上涨阶段伴随更高成交量，量价结构偏强，市场资金参与度提升，当前趋势通常具有更好的延续性与稳定性。")
-cloud_bear_color = input.color(color.red, "🔴 SMA > VWMA (量价共振减弱)", group=grp_cloud, tooltip="当 SMA 高于 VWMA 时，说明价格上涨过程中成交量支撑减弱，或下跌阶段伴随放量，量价结构偏弱，当前趋势的持续性可能下降，需注意震荡、回撤或趋势衰减风险。")
+use_htf      = input.bool(true, "开启宏观 HTF (200均线) 评分", group=grp_cloud)
+htf_len      = input.int(200, "HTF 周期", group=grp_cloud, display=display.none)
 
-// 计算均线
-slowSMA = ta.sma(close, sma_slow_len)
+show_vwma = input.bool(true, "显示 VWMA", inline="c_show", group=grp_cloud)
+show_ema  = input.bool(true, "显示 慢EMA", inline="c_show", group=grp_cloud)
+
+// 基础变量线
 vwmaVal = ta.vwma(close, vwma_len)
+slowEMA = ta.ema(close, ema_slow_len)
+htfEMA  = ta.ema(close, htf_len)
 
-// 画线并赋予变量，用于云图填充
-p_slowSMA = plot(show_slow_sma ? slowSMA : na, "慢SMA", color=sma_color_slow, linewidth=2)
-p_vwma    = plot(show_vwma ? vwmaVal : na, "VWMA", color=vwma_color, linewidth=2)
+// 画线
+p_vwma = plot(show_vwma ? vwmaVal : na, "VWMA (微观资金)", color=color.rgb(0, 255, 170), linewidth=2)
+p_ema  = plot(show_ema ? slowEMA : na, "EMA (中观趋势)", color=color.rgb(255, 152, 0), linewidth=2)
+plot(use_htf ? htfEMA : na, "HTF (宏观地基)", color=color.new(color.white, 70), linewidth=1, style=plot.style_circles)
 
-// 逻辑计算与云图颜色分配
-fill_color = vwmaVal > slowSMA ? color.new(cloud_bull_color, cloud_transp) : vwmaVal < slowSMA ? color.new(cloud_bear_color, cloud_transp) : na
+// ==========================================
+// 层级 1：HTF 宏观动能评分 (Score)
+// ==========================================
+// 计算200均线自身的倾斜率 (过去10根K线的变化) 和 价格乖离率
+htf_slope = (htfEMA - htfEMA[10]) / htfEMA[10] * 100
+htf_dist  = (close - htfEMA) / htfEMA * 100
+// 综合评分：倾向于顺应倾斜角和价格位置。>0 为宏观偏多，<0 为宏观偏空。
+htf_score = htf_slope + (htf_dist * 0.1) 
 
-// 执行填充
-fill(p_vwma, p_slowSMA, show_cloud ? fill_color : na, title="主力资金云图")
+macro_strong_bull = htf_score > 0.2
+macro_strong_bear = htf_score < -0.2
+
+// ==========================================
+// 层级 2：中观 ADX 环境与定向震荡 (Directional Chop)
+// ==========================================
+[plusDI, minusDI, adxValue] = ta.dmi(14, 14)
+isChop = adxValue < adx_thresh
+
+// 计算中周期 EMA 的方向，用于给震荡定性
+ema_is_up = slowEMA > slowEMA[3]
+ema_is_dn = slowEMA < slowEMA[3]
+
+// ==========================================
+// 层级 3：微观资金强度自适应归一化
+// ==========================================
+raw_spread = math.abs(vwmaVal - slowEMA) / slowEMA * 100
+asset_volatility = ta.atr(14) / close * 100
+norm_spread = raw_spread / math.max(asset_volatility, 0.001)
+
+// ==========================================
+// 调色盘库 (状态对应的色彩语义)
+// ==========================================
+// 单边主升/主跌（带自适应强度渐变）
+bull_grad = color.from_gradient(norm_spread, 0, 1.5, color.new(color.green, 85), color.new(color.green, 15))
+bear_grad = color.from_gradient(norm_spread, 0, 1.5, color.new(color.red, 85), color.new(color.red, 15))
+
+// 定向整理 (Chop 分级)
+bull_chop_color = color.new(#00BCD4, 75) // 蓝绿色(Teal)：多头中继，安全横盘
+bear_chop_color = color.new(#FF9800, 75) // 橙色(Orange)：空头中继，危险横盘
+neutral_chop    = color.new(color.gray, 75) // 纯死灰：毫无方向的垃圾时间
+
+// 逆势惩罚色 (熊市死猫跳 / 牛市骗炮)
+trap_color = color.new(color.gray, 85)
+
+// ==========================================
+// 终极状态机矩阵 (Decision Tree)
+// ==========================================
+color final_cloud_color = na
+
+if not na(vwmaVal)
+    // --- 状态分支 A：ADX 判定为震荡期 ---
+    if use_adx and isChop
+        // 优先级覆盖：如果宏观是极强牛市，且中观EMA朝上，这叫“多头中继”，拒绝死灰！
+        if macro_strong_bull and ema_is_up
+            final_cloud_color := bull_chop_color
+        // 反之，如果是宏观熊市且EMA朝下，叫“空头中继”
+        else if macro_strong_bear and ema_is_dn
+            final_cloud_color := bear_chop_color
+        // 宏观也没有明确方向的震荡，才是真正的垃圾时间
+        else
+            final_cloud_color := neutral_chop
+
+    // --- 状态分支 B：微观资金向上 (VWMA > EMA) ---
+    else if vwmaVal > slowEMA
+        // HTF 过滤：如果宏观是强熊市，资金的突然向上大概率是诱多反弹 (Trap)
+        if use_htf and macro_strong_bear
+            final_cloud_color := trap_color
+        else
+            final_cloud_color := bull_grad
+
+    // --- 状态分支 C：微观资金向下 (VWMA < EMA) ---
+    else if vwmaVal < slowEMA
+        // HTF 过滤：如果宏观是强牛市，资金的突然向下极可能是洗盘诱空
+        if use_htf and macro_strong_bull
+            final_cloud_color := trap_color
+        else
+            final_cloud_color := bear_grad
+
+// 执行状态渲染
+fill(p_vwma, p_ema, show_cloud ? final_cloud_color : na, title="状态机定性云图")
