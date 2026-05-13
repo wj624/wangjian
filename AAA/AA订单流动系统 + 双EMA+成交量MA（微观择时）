@@ -427,8 +427,8 @@ sma_color_slow = input.color(color.rgb(230, 180, 0), "慢SMA颜色", inline="c_c
 vwma_color     = input.color(color.rgb(255, 0, 0),   "VWMA颜色",  inline="c_color", group=grp_cloud)
 
 // 云图逻辑说明
-cloud_bull_color = input.color(color.green, "🟢 VWMA > SMA (主力吸筹/主升浪)", group=grp_cloud, tooltip="VWMA代表资金加权成本。当它高于纯价格均线SMA时，说明放量上涨/缩量下跌，大资金在主动买入，趋势极其扎实。")
-cloud_bear_color = input.color(color.red, "🔴 SMA > VWMA (主力派发/出货危险)", group=grp_cloud, tooltip="SMA高于VWMA，说明上涨无量/下跌放量。表面上价格在涨，但真实资金在悄悄撤退，存在极高的诱多风险。")
+cloud_bull_color = input.color(color.green, "🟢 VWMA > SMA (量价共振增强)", group=grp_cloud, tooltip="VWMA 代表成交量加权平均价格。当 VWMA 高于 SMA 时，说明近期上涨阶段伴随更高成交量，量价结构偏强，市场资金参与度提升，当前趋势通常具有更好的延续性与稳定性。")
+cloud_bear_color = input.color(color.red, "🔴 SMA > VWMA (量价共振减弱)", group=grp_cloud, tooltip="当 SMA 高于 VWMA 时，说明价格上涨过程中成交量支撑减弱，或下跌阶段伴随放量，量价结构偏弱，当前趋势的持续性可能下降，需注意震荡、回撤或趋势衰减风险。")
 
 // 计算均线
 slowSMA = ta.sma(close, sma_slow_len)
