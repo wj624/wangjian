@@ -409,7 +409,7 @@ else
         label.delete(dataLabel[1]) 
  
 // ────────────────────────────────────────
-// 【V3.0 经典回归版】结构状态机 (HH/HL + 双轨迟滞 + 乖离过滤)
+// 【V3.1 优化版】结构状态机 (双极确认 + 动态衰减)
 // ────────────────────────────────────────
 grp_cloud = "V3.0 结构状态机"
 
@@ -418,22 +418,24 @@ show_cloud   = input.bool(true, "开启结构云图", group=grp_cloud)
 vwma_len     = input.int(20, "资金线 (VWMA)", inline="c_len", group=grp_cloud)
 ema_slow_len = input.int(60, "趋势线 (EMA)", inline="c_len", group=grp_cloud)
 
-// 双阈值迟滞参数 (彻底解决云图闪烁)
-adx_on       = input.int(22, "ADX 激活阈值 (进入趋势)", inline="adx", group=grp_cloud)
-adx_off      = input.int(18, "ADX 衰退阈值 (退出趋势)", inline="adx", group=grp_cloud)
-slope_thresh = input.float(0.5, "EMA 动能斜率补偿 (%)", step=0.1, group=grp_cloud)
-valid_spread_thresh = input.float(0.3, "有效乖离率阈值 (%)", step=0.1, group=grp_cloud)
+adx_period   = input.int(14, "ADX 周期", group=grp_cloud)
+trend_on     = input.int(25, "ADX 启动阈值", group=grp_cloud)
+trend_off    = input.int(20, "ADX 衰减阈值", group=grp_cloud)
+slope_period = input.int(5, "EMA 斜率周期", group=grp_cloud)
+slope_thresh = input.float(0.3, "斜率阈值 (%)", step=0.1, group=grp_cloud)
+valid_spread_thresh = input.float(0.3, "有效乖离率 (%)", step=0.1, group=grp_cloud)
+trap_spread_thresh  = input.float(2.5, "陷阱乖离判定 (%)", step=0.1, group=grp_cloud)
 
 vwmaVal = ta.vwma(close, vwma_len)
 slowEMA = ta.ema(close, ema_slow_len)
 htfEMA  = ta.ema(close, 200)
 
-p_vwma = plot(show_cloud ? vwmaVal : na, "VWMA (微观资金)", color=color.rgb(0, 255, 170), linewidth=2)
-p_ema  = plot(show_cloud ? slowEMA : na, "EMA (中观趋势)", color=color.rgb(255, 152, 0), linewidth=2)
-plot(show_cloud ? htfEMA : na, "HTF (宏观地基)", color=color.new(color.white, 70), linewidth=1, style=plot.style_circles)
+p_vwma = plot(show_cloud ? vwmaVal : na, "VWMA", color=color.rgb(0, 255, 170), linewidth=2)
+p_ema  = plot(show_cloud ? slowEMA : na, "EMA",  color=color.rgb(255, 152, 0), linewidth=2)
+plot(show_cloud ? htfEMA : na, "HTF 200", color=color.new(color.white, 70), linewidth=1, style=plot.style_circles)
 
 // ==========================================
-// 核心引擎 1：市场结构扫描器 (Market Structure HH/HL/LH/LL)
+// 核心引擎 1：双极确认结构扫描 (2-Step Confirmation)
 // ==========================================
 pivot_left = 5
 pivot_right = 5
@@ -442,90 +444,101 @@ pl = ta.pivotlow(low, pivot_left, pivot_right)
 
 var float last_ph = na
 var float last_pl = na
-var int struct_state = 0 // 1 = 结构多头 (HH/HL), -1 = 结构空头 (LH/LL)
+var int seq_bull = 0   // 连续的多头结构计数
+var int seq_bear = 0   // 连续的空头结构计数
+var int struct_state = 0
 
-// 侦测高点演化
+// 处理高点
 if not na(ph)
-    if na(last_ph) or ph > last_ph 
-        struct_state := 1    // HH -> 多头结构
-    else if ph < last_ph 
-        struct_state := -1   // LH -> 结构转弱
+    if na(last_ph) or ph > last_ph
+        seq_bull += 1
+        seq_bear := 0
+    else if ph < last_ph
+        seq_bear += 1
+        seq_bull := 0
     last_ph := ph
 
-// 侦测低点演化
+// 处理低点
 if not na(pl)
-    if na(last_pl) or pl < last_pl 
-        struct_state := -1   // LL -> 空头结构
-    else if pl > last_pl 
-        struct_state := 1    // HL -> 结构转强
+    if na(last_pl) or pl < last_pl
+        seq_bear += 1
+        seq_bull := 0
+    else if pl > last_pl
+        seq_bull += 1
+        seq_bear := 0
     last_pl := pl
+
+// 需要连续 2 个同向极点才切换状态，否则维持原状
+if seq_bull >= 2
+    struct_state := 1
+    seq_bull := 0
+if seq_bear >= 2
+    struct_state := -1
+    seq_bear := 0
 
 struct_bull = struct_state == 1
 struct_bear = struct_state == -1
 
 // ==========================================
-// 核心引擎 2：双轨动量迟滞系统 (Hysteresis Band)
+// 核心引擎 2：动态衰减动量系统
 // ==========================================
-[plusDI, minusDI, adxValue] = ta.dmi(14, 14)
-ema_slope = (slowEMA - slowEMA[5]) / slowEMA[5] * 100 
+[plusDI, minusDI, adxValue] = ta.dmi(adx_period, adx_period)
+ema_slope = (slowEMA - slowEMA[slope_period]) / slowEMA[slope_period] * 100
 
-var bool isTrending = false // 开启跨 K 线状态记忆
+var bool trend_energy = false
 
-// 突破上轨或斜率爆发，立刻激活趋势
-if (adxValue >= adx_on) or (math.abs(ema_slope) >= slope_thresh)
-    isTrending := true
-// 跌破下轨且斜率平缓，才退出趋势
-else if (adxValue <= adx_off) and (math.abs(ema_slope) < slope_thresh)
-    isTrending := false
+// 激活：ADX 突破启动线，或斜率爆发
+if adxValue >= trend_on or math.abs(ema_slope) >= slope_thresh
+    trend_energy := true
+// 退出：ADX 跌破衰减线 且 斜率平静
+else if adxValue < trend_off and math.abs(ema_slope) < slope_thresh
+    trend_energy := false
+
+// 辅助：资金方向 (DI 交叉)
+di_bull = plusDI > minusDI
+di_bear = plusDI < minusDI
 
 // ==========================================
-// 核心引擎 3：有效乖离率验证 (Spread Filter)
+// 核心引擎 3：有效乖离 + 陷阱过滤
 // ==========================================
 raw_spread = math.abs(vwmaVal - slowEMA) / slowEMA * 100
 is_valid_spread = raw_spread >= valid_spread_thresh
 
-// ==========================================
-// 调色盘与宏观辅助防守
-// ==========================================
-color_strong_bull = color.new(color.green, 30)   // 🟢 强多
-color_strong_bear = color.new(color.red, 30)     // 🔴 强空
-color_bull_prep   = color.new(#00BCD4, 70)       // 🔵 青色：多头蓄势
-color_bear_prep   = color.new(#FF9800, 70)       // 🟠 橙色：空头蓄势
-color_garbage     = color.new(color.gray, 80)    // ⚪ 灰：陷阱/死区
-
-// 200EMA 作为宏观底线防守
-macro_bull_defense = close > htfEMA
-macro_bear_defense = close < htfEMA
+// 200EMA 偏离率
+htf_dev = math.abs(close - htfEMA) / htfEMA * 100
+trap_condition = htf_dev > trap_spread_thresh   // 只有大幅偏离才视为陷阱区
 
 // ==========================================
-// V3.0 决策树渲染
+// 决策树渲染
 // ==========================================
+color_strong_bull = color.new(color.green, 30)
+color_strong_bear = color.new(color.red, 30)
+color_bull_prep   = color.new(#00BCD4, 70)
+color_bear_prep   = color.new(#FF9800, 70)
+color_garbage     = color.new(color.gray, 85)
+
 color final_cloud_color = na
 
 if not na(vwmaVal)
-    // --- 资金向上推升 ---
+    // --- 资金向上 ---
     if vwmaVal > slowEMA
-        // 如果结构是空头(LH/LL)，且价格在200均线之下 -> 诱多陷阱
-        if struct_bear and not macro_bull_defense
-            final_cloud_color := color_garbage    
-        // 噪音过滤：趋势能量已死 或 均线没拉开差距 -> 多头蓄势
-        else if not is_valid_spread or not isTrending
-            final_cloud_color := color_bull_prep   
-        // 结构多头 + 能量充沛 + 乖离达标 -> 绿灯全开
+        // 大偏离 + 空头结构 + 价格远在 200EMA 之下 → 诱多陷阱
+        if trap_condition and struct_bear and close < htfEMA
+            final_cloud_color := color_garbage
+        // 有效能量 且 多头结构（或 DI 强势）→ 强多
+        else if trend_energy and is_valid_spread and (struct_bull or di_bull)
+            final_cloud_color := color_strong_bull
+        // 其余为蓄势
         else
-            final_cloud_color := color_strong_bull 
+            final_cloud_color := color_bull_prep
 
-    // --- 资金向下砸盘 ---
+    // --- 资金向下 ---
     else if vwmaVal < slowEMA
-        // 如果结构是多头(HH/HL)，且价格在200均线之上 -> 洗盘诱空
-        if struct_bull and not macro_bear_defense
-            final_cloud_color := color_garbage    
-        // 噪音过滤：趋势能量已死 或 乖离率不够 -> 空头蓄势
-        else if not is_valid_spread or not isTrending
-            final_cloud_color := color_bear_prep   
-        // 结构空头 + 能量充沛 + 乖离达标 -> 红灯全开
+        if trap_condition and struct_bull and close > htfEMA
+            final_cloud_color := color_garbage
+        else if trend_energy and is_valid_spread and (struct_bear or di_bear)
+            final_cloud_color := color_strong_bear
         else
-            final_cloud_color := color_strong_bear 
+            final_cloud_color := color_bear_prep
 
-// 执行渲染
-fill(p_vwma, p_ema, show_cloud ? final_cloud_color : na, title="V3.0 结构云图")
+fill(p_vwma, p_ema, show_cloud ? final_cloud_color : na, title="V3.1 结构云图")
