@@ -408,25 +408,25 @@ else
  
         label.delete(dataLabel[1]) 
  
+/// ────────────────────────────────────────
+// 【V3.3 寂静专业版】结构衰减 + 中性灰
 // ────────────────────────────────────────
-// 【V3.2 极简实盘版】结构状态机（采纳优化建议）
-// ────────────────────────────────────────
-grp_cloud = "V3.2 结构状态机"
+grp_cloud = "V3.3 结构状态机"
 
 show_cloud   = input.bool(true, "开启结构云图", group=grp_cloud)
 
-vwma_len     = input.int(20, "资金线 (VWMA)", inline="c_len", group=grp_cloud)
-ema_slow_len = input.int(60, "趋势线 (EMA)", inline="c_len", group=grp_cloud)
+vwma_len     = input.int(20, "VWMA 周期", inline="len", group=grp_cloud)
+ema_slow_len = input.int(60, "EMA 周期", inline="len", group=grp_cloud)
 
-// 结构扫描参数（可调）
-pivot_len    = input.int(3, "结构枢轴长度", minval=2, maxval=10, group=grp_cloud)
+pivot_len        = input.int(3, "枢轴长度", minval=2, group=grp_cloud)
+struct_max_age   = input.int(25, "结构最大寿命 (根)", minval=10, group=grp_cloud)  // 新增
 
 adx_period   = input.int(14, "ADX 周期", group=grp_cloud)
-trend_on     = input.int(25, "ADX 启动阈值", group=grp_cloud)
-trend_off    = input.int(20, "ADX 衰减阈值", group=grp_cloud)
-slope_period = input.int(5, "EMA 斜率周期", group=grp_cloud)
+trend_on     = input.int(25, "趋势启动阈值", group=grp_cloud)
+trend_off    = input.int(20, "趋势衰减阈值", group=grp_cloud)
+slope_period = input.int(5, "斜率周期", group=grp_cloud)
 slope_thresh = input.float(0.3, "斜率阈值 (%)", step=0.1, group=grp_cloud)
-valid_spread_thresh = input.float(0.3, "有效乖离率 (%)", step=0.1, group=grp_cloud)
+spread_thresh = input.float(0.3, "乖离阈值 (%)", step=0.1, group=grp_cloud)
 
 vwmaVal = ta.vwma(close, vwma_len)
 slowEMA = ta.ema(close, ema_slow_len)
@@ -436,9 +436,7 @@ p_vwma = plot(show_cloud ? vwmaVal : na, "VWMA", color=color.rgb(0, 255, 170), l
 p_ema  = plot(show_cloud ? slowEMA : na, "EMA",  color=color.rgb(255, 152, 0), linewidth=2)
 plot(show_cloud ? htfEMA : na, "HTF 200", color=color.new(color.white, 70), linewidth=1, style=plot.style_circles)
 
-// ==========================================
-// 核心引擎 1：3/3 枢轴 + 双极确认结构
-// ==========================================
+// ── 结构引擎：3/3 双极确认 + 衰减 ──
 ph = ta.pivothigh(high, pivot_len, pivot_len)
 pl = ta.pivotlow(low, pivot_len, pivot_len)
 
@@ -447,7 +445,21 @@ var float last_pl = na
 var int seq_bull = 0
 var int seq_bear = 0
 var int struct_state = 0
+var int bars_since_pivot = 0
 
+// 结构计数与衰减
+if not na(ph) or not na(pl)
+    bars_since_pivot := 0
+else
+    bars_since_pivot += 1
+
+// 超过寿命，结构死亡
+if bars_since_pivot >= struct_max_age
+    struct_state := 0
+    seq_bull := 0
+    seq_bear := 0
+
+// 更新极点序列
 if not na(ph)
     if na(last_ph) or ph > last_ph
         seq_bull += 1
@@ -466,6 +478,7 @@ if not na(pl)
         seq_bear := 0
     last_pl := pl
 
+// 双极确认切换
 if seq_bull >= 2
     struct_state := 1
     seq_bull := 0
@@ -476,9 +489,7 @@ if seq_bear >= 2
 struct_bull = struct_state == 1
 struct_bear = struct_state == -1
 
-// ==========================================
-// 核心引擎 2：动态衰减动量（保留 ADX 迟滞）
-// ==========================================
+// ── 趋势能量引擎（ADX 迟滞） ──
 [plusDI, minusDI, adxValue] = ta.dmi(adx_period, adx_period)
 ema_slope = (slowEMA - slowEMA[slope_period]) / slowEMA[slope_period] * 100
 
@@ -488,36 +499,32 @@ if adxValue >= trend_on or math.abs(ema_slope) >= slope_thresh
 else if adxValue < trend_off and math.abs(ema_slope) < slope_thresh
     trend_energy := false
 
-// ==========================================
-// 核心引擎 3：乖离率验证
-// ==========================================
-raw_spread = math.abs(vwmaVal - slowEMA) / slowEMA * 100
-is_valid_spread = raw_spread >= valid_spread_thresh
+// ── 乖离率 ──
+spread = math.abs(vwmaVal - slowEMA) / slowEMA * 100
+valid_spread = spread >= spread_thresh
 
-// ==========================================
-// 决策树渲染（已移除 DI 和 trap）
-// ==========================================
-color_strong_bull = color.new(color.green, 30)
-color_strong_bear = color.new(color.red, 30)
-color_bull_prep   = color.new(#00BCD4, 70)
-color_bear_prep   = color.new(#FF9800, 70)
-color_garbage     = color.new(color.gray, 85)
+// ── 颜色定义 ──
+var color strong_bull = color.new(color.green, 30) //状态：强势多头趋势
+var color strong_bear = color.new(color.red, 30) //状态：强势空头趋势
+var color prep_bull   = color.new(#00BCD4, 70) //状态：多头蓄势 / 预备
+var color prep_bear   = color.new(#FF9800, 70) //状态：空头蓄势 / 预备
+var color neutral     = color.new(color.gray, 92)  // 新增真正中性色  状态：彻底无趋势 / 盘整休眠
 
-color final_cloud_color = na
+color final_color = na
 
 if not na(vwmaVal)
-    // --- 资金向上 ---
-    if vwmaVal > slowEMA
-        if trend_energy and is_valid_spread and struct_bull
-            final_cloud_color := color_strong_bull
+    // 中性优先：无能量且无乖离 → 灰
+    if not trend_energy and not valid_spread
+        final_color := neutral
+    else if vwmaVal > slowEMA
+        if trend_energy and valid_spread and struct_bull
+            final_color := strong_bull
         else
-            final_cloud_color := color_bull_prep
-
-    // --- 资金向下 ---
+            final_color := prep_bull
     else if vwmaVal < slowEMA
-        if trend_energy and is_valid_spread and struct_bear
-            final_cloud_color := color_strong_bear
+        if trend_energy and valid_spread and struct_bear
+            final_color := strong_bear
         else
-            final_cloud_color := color_bear_prep
+            final_color := prep_bear
 
-fill(p_vwma, p_ema, show_cloud ? final_cloud_color : na, title="V3.2 结构云图")
+fill(p_vwma, p_ema, show_cloud ? final_color : na, title="V3.3 结构云图")
