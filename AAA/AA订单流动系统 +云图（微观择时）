@@ -504,11 +504,11 @@ spread = math.abs(vwmaVal - slowEMA) / slowEMA * 100
 valid_spread = spread >= spread_thresh
 
 // ── 颜色定义 ──
-var color strong_bull = color.new(color.green, 30) //状态：强势多头趋势
+var color strong_bull = color.new(color.green, 30) //状态：强势多头趋势/触发条件（三者同时满足）：VWMA > EMA（资金向上推升）、趋势能量启动（ADX 高 或 EMA 斜率达标）、乖离率达标（均线真正拉开距离）、结构确认为多头（连续 HH/HL）
 var color strong_bear = color.new(color.red, 30) //状态：强势空头趋势
-var color prep_bull   = color.new(#00BCD4, 70) //状态：多头蓄势 / 预备
-var color prep_bear   = color.new(#FF9800, 70) //状态：空头蓄势 / 预备
-var color neutral     = color.new(color.gray, 92)  // 新增真正中性色  状态：彻底无趋势 / 盘整休眠
+var color prep_bull   = color.new(#00BCD4, 70) //状态：多头蓄势 / 趋势能量尚未启动，或乖离率不够，或结构还未确认多头（可能还是盘整结构）
+var color prep_bear   = color.new(#FF9800, 70) //状态：空头蓄势 / 与青色镜像，方向向下
+var color neutral     = color.new(color.gray, 92)  // 新增真正中性色  状态：彻底无趋势 / 盘整休眠/趋势能量熄灭 且 乖离率不达标
 
 color final_color = na
 
