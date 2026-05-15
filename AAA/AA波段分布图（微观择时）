@@ -1,5 +1,5 @@
 //@version=6
-indicator("Structural Leg Profiler (中文版)", "波段分布图", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+indicator("Structural Leg Profiler + 异常量AVWAP", "波段分布图+AVWAP", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 //---------------------------------------------------------------------------------------------------------------------}
 // 输入设置 (Inputs)
@@ -17,6 +17,7 @@ bool   extendPoc   = input.bool(true, "延伸未测试的 POC (控制点)", grou
 string GRP_BUBBLES = "成交量异常 (Volume Anomalies)"
 bool   showBubbles = input.bool(true, "显示成交量气泡", group=GRP_BUBBLES)
 float  bubbleMult  = input.float(2.0, "激增阈值 (x SMA)", step=0.1, group=GRP_BUBBLES, tooltip="高亮显示成交量大于 20 周期平均值 X 倍的K线。")
+bool   showAvwap   = input.bool(true, "叠加异常量 AVWAP", group=GRP_BUBBLES, tooltip="以最近一次成交量激增的K线为起点，动态计算VWAP资金成本线。") // 新增 AVWAP 开关
 
 string GRP_COLORS  = "样式与颜色 (Style & Colors)"
 string colorMode   = input.string("成交量渐变", "分布框颜色模式", options=["成交量渐变", "多空差值 (买入 vs 卖出)"], group=GRP_COLORS)
@@ -28,6 +29,8 @@ color  upEndC      = input.color(color.new(#00E5FF, 0), "上涨波段 (高量)",
 color  dnStartC    = input.color(color.new(#311B92, 0), "下跌波段 (低量)", group=GRP_COLORS, inline="dn")
 color  dnMidC      = input.color(color.new(#C51162, 0), "下跌波段 (中量)", group=GRP_COLORS, inline="dn")
 color  dnEndC      = input.color(color.new(#FF5252, 0), "下跌波段 (高量)", group=GRP_COLORS, inline="dn")
+
+color  avwapC      = input.color(color.new(#9b03a8, 0), "异常量 AVWAP 颜色", group=GRP_COLORS) // 新增 AVWAP 颜色
 
 //---------------------------------------------------------------------------------------------------------------------}
 // 类型定义 (Types)
@@ -70,6 +73,11 @@ var float zzLow          = low
 var int   zzLowBar       = bar_index
 var int   lastPivotBar   = bar_index
 var float lastPivotPrice = close
+
+// === AVWAP 状态变量 ===
+var float avwapCumVol = 0.0
+var float avwapCumSrc = 0.0
+var bool  isAvwapActive = false
 
 //---------------------------------------------------------------------------------------------------------------------}
 // 方法与函数 (Methods / Functions)
@@ -120,7 +128,6 @@ method draw(CandleProfile this, int startBar, int endBar, bool isUpLeg, float to
     color midC   = isUpLeg ? upMidC : dnMidC
     color endC   = isUpLeg ? upEndC : dnEndC
     
-    // 更新了中文选项判断
     string parsedAlign = alignMode == "左侧" ? text.align_left : alignMode == "右侧" ? text.align_right : text.align_center
     
     for i = 0 to this.numBoxes - 1
@@ -137,7 +144,6 @@ method draw(CandleProfile this, int startBar, int endBar, bool isUpLeg, float to
             
             color textColor = na
             
-            // 更新了中文选项判断
             if colorMode == "多空差值 (买入 vs 卖出)"
                 if currentBoxDelta > 0
                     textColor := color.from_gradient(currentBoxDelta, 0, this.maxVolumeInProfile, color.new(color.green, 60), color.new(color.green, 0))
@@ -164,11 +170,10 @@ method draw(CandleProfile this, int startBar, int endBar, bool isUpLeg, float to
     color deltaColor = delta > 0 ? color.green : color.red
     string deltaSign = delta > 0 ? "+" : ""
     
-    // 更新了图表上的显示文字
     string summaryText = "波段量: " + str.tostring(totalBuyVol + totalSellVol, format.volume) + "\n" +
                          "多空差(Delta): " + deltaSign + str.tostring(delta, format.volume) + "\n" +
                          "控制点(POC): " + str.tostring(this.pocPrice, format.mintick)
-                        
+                         
     int midBar = int(math.round((startBar + endBar) / 2))
     float summaryY = isUpLeg ? this.profileHigh : this.profileLow
     label.new(midBar, summaryY, text=summaryText, color=color.new(chart.bg_color, 20), style=isUpLeg ? label.style_label_down : label.style_label_up, textcolor=deltaColor, size=size.tiny)
@@ -302,18 +307,52 @@ if untestedPocs.size() > 0
                     untestedPocs.remove(i)
 
 //---------------------------------------------------------------------------------------------------------------------}
-// 成交量异常气泡 (Volume Anomalies)
+// 成交量异常气泡 + AVWAP 逻辑 (融合优化版 & 修复开关依赖)
 //---------------------------------------------------------------------------------------------------------------------{
-if showBubbles
+bool triggerAvwapReset = false
+
+// 【修复点】：只要气泡或 AVWAP 任意一个开启，就执行均量计算
+if showBubbles or showAvwap
     float volSma = ta.sma(volume, 20)
     if volSma > 0
         float volRatio = volume / volSma
         if volRatio >= bubbleMult
-            bool isBull = close >= open
-            color bubColor = isBull ? color.new(upEndC, 40) : color.new(dnEndC, 40)
-            int dynSize = int(math.max(6, math.min(volRatio * 4, 20)))
-            string bubText = volRatio >= (bubbleMult * 1.5) ? str.tostring(volume, format.volume) : ""
-            // 更新了气泡的悬浮提示文字
-            label.new(bar_index, hl2, text=bubText, color=bubColor, style=label.style_circle, textcolor=color.white, size=dynSize, tooltip="成交量: " + str.tostring(volume, format.volume) + "\n激增倍数: " + str.tostring(volRatio, "#.##") + "倍 均量")
+            triggerAvwapReset := true // 触发重置信号
+            
+            // 只有当“显示气泡”开启时，才执行气泡绘图逻辑
+            if showBubbles
+                bool isBull = close >= open
+                color bubColor = isBull ? color.new(upEndC, 40) : color.new(dnEndC, 40)
+                int dynSize = int(math.max(6, math.min(volRatio * 4, 20)))
+                string bubText = volRatio >= (bubbleMult * 1.5) ? str.tostring(volume, format.volume) : ""
+                
+                label.new(bar_index, hl2, text=bubText, color=bubColor, 
+                          style=label.style_circle, textcolor=color.white, 
+                          size=dynSize, tooltip="成交量激增: " + str.tostring(volRatio, "#.##") + "倍\nAVWAP 将以此K线为新锚点")
+
+// === AVWAP 动态计算 ===
+float typicalPrice = hlc3
+
+if showAvwap
+    if triggerAvwapReset
+        // 重置锚点
+        avwapCumVol := volume
+        avwapCumSrc := typicalPrice * volume
+        isAvwapActive := true
+    else if isAvwapActive
+        // 【关键逻辑】实盘实时跟随量价变动
+        avwapCumVol += volume
+        avwapCumSrc += typicalPrice * volume
+
+float currentAvwap = (showAvwap and isAvwapActive) ? (avwapCumSrc / avwapCumVol) : na
+
+// 绘制动态 AVWAP 曲线
+plot(currentAvwap, title="异常量 AVWAP", color=avwapC, linewidth=2, style=plot.style_linebr)
+
+// 保留优秀的视觉设计：在锚点处显示文字标记
+if triggerAvwapReset and showAvwap
+    label.new(bar_index, currentAvwap, text="AVWAP\n重置", 
+              style=label.style_label_up, size=size.small, 
+              color=color.new(avwapC, 70), textcolor=color.white, yloc=yloc.price)
 
 //---------------------------------------------------------------------------------------------------------------------}
