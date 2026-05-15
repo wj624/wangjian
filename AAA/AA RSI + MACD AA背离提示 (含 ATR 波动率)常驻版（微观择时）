@@ -12,7 +12,6 @@ macdFast = input.int(12, "MACD 快线", group="2. MACD(Hist) 设置")
 macdSlow = input.int(26, "MACD 慢线", group="2. MACD(Hist) 设置")
 macdSignal = input.int(9, "MACD 信号线", group="2. MACD(Hist) 设置")
 
-// 原有的动能开关
 plotMacdBull = input.bool(true, "常规底背离检测 (MACD柱)", group="2. MACD(Hist) 设置")
 plotMacdHiddenBull = input.bool(false, "隐藏底背离检测 (MACD柱)", group="2. MACD(Hist) 设置")
 plotMacdBear = input.bool(true, "常规顶背离检测 (MAC柱)", group="2. MACD(Hist) 设置")
@@ -41,9 +40,9 @@ cciExtremeOB = input.int(200, "CCI 极端超买警戒线", group="7. CCI 极端�
 cciExtremeOS = input.int(-200, "CCI 极端超卖警戒线", group="7. CCI 极端偏离刺探器")
 
 // ==================== 8. 视觉报警控制台 ====================
-showRealTime = input.bool(true, "【显示】实时显示指标", group="8. 视觉报警控制台 (附图开关)", tooltip="控制 MACD(Hist) 动能先锋、CCI 极端偏离、MFI 超买超卖等当根K线实时触发（0延迟）的视觉标签")
-showLagging  = input.bool(true, "【显示】滞后5K确认指标", group="8. 视觉报警控制台 (附图开关)", tooltip="控制 RSI、MFI 及其共振信号等需要等待右视距(5根K线)走完确认结构的视觉标签")
-showBgAlert  = input.bool(true, "【显示】阶梯背景报警 (3档位)", group="8. 视觉报警控制台 (附图开关)", tooltip="当实时指标(ATR>80, RSI极值, Hist实时拐点, CCI极值, MFI极值)同时触发3个或以上时显示背景。5个全中颜色最深。")
+showRealTime = input.bool(true, "【显示】实时显示指标", group="8. 视觉报警控制台 (附图开关)")
+showLagging  = input.bool(true, "【显示】滞后5K确认指标", group="8. 视觉报警控制台 (附图开关)")
+showBgAlert  = input.bool(true, "【显示】阶梯背景报警 (3档位)", group="8. 视觉报警控制台 (附图开关)")
 
 // ==================== 9. 新增：ATR 止损参考面板 ====================
 showAtrPanel = input.bool(true, "显示 ATR 止损参考面板", group="9. 止损参考信息 (ATR数据)")
@@ -80,41 +79,29 @@ macdPhFound = not na(ta.pivothigh(macdHist, lbL, lbR))
 mfiPlFound = not na(ta.pivotlow(mfiVal, lbL, lbR))
 mfiPhFound = not na(ta.pivothigh(mfiVal, lbL, lbR))
 
-inRangePl_dist = bar_index - ta.valuewhen(plFound, bar_index, 1)
-inRangePh_dist = bar_index - ta.valuewhen(phFound, bar_index, 1)
-inRangeMfiPl_dist = bar_index - ta.valuewhen(mfiPlFound, bar_index, 1)
-inRangeMfiPh_dist = bar_index - ta.valuewhen(mfiPlFound, bar_index, 1)
+// 【还原】100% 还原原始测距逻辑
+_inRange(cond) =>
+    dist = bar_index - ta.valuewhen(cond, bar_index, 1)
+    rangeLower <= dist and dist <= rangeUpper
 
-inRangePl = rangeLower <= inRangePl_dist and inRangePl_dist <= rangeUpper
-inRangePh = rangeLower <= inRangePh_dist and inRangePh_dist <= rangeUpper
-inRangeMfiPl = rangeLower <= inRangeMfiPl_dist and inRangeMfiPl_dist <= rangeUpper
-inRangeMfiPh = rangeLower <= inRangeMfiPh_dist and inRangeMfiPh_dist <= rangeUpper
+inRangePl = _inRange(plFound)
+inRangePh = _inRange(phFound)
+inRangeMfiPl = _inRange(mfiPlFound)
+inRangeMfiPh = _inRange(mfiPhFound)
 
 // ==================== 指标独立背离状态提取 ====================
-
-// MFI 历史锚点提取
-vw_mfiPl_low1 = ta.valuewhen(mfiPlFound, low[lbR], 1)
-vw_mfiPl_mfi1 = ta.valuewhen(mfiPlFound, mfiVal[lbR], 1)
-vw_mfiPh_high1 = ta.valuewhen(mfiPhFound, high[lbR], 1)
-vw_mfiPh_mfi1 = ta.valuewhen(mfiPhFound, mfiVal[lbR], 1)
-
-// RSI 历史锚点提取
-vw_pl_low1 = ta.valuewhen(plFound, low[lbR], 1)
-vw_pl_osc1 = ta.valuewhen(plFound, osc[lbR], 1)
-vw_ph_high1 = ta.valuewhen(phFound, high[lbR], 1)
-vw_ph_osc1 = ta.valuewhen(phFound, osc[lbR], 1)
-
+// 【还原】100% 还原带有隐性短路过滤机制的原始背离逻辑 (忽略编译器的黄字警告，这里正是策略精髓所在)
 // --- MFI 资金动向 (保留 5 根 K 线确认) ---
-mfiBullAlert = low[lbR] < vw_mfiPl_low1 and mfiVal[lbR] > vw_mfiPl_mfi1 and mfiPlFound and inRangeMfiPl
-mfiBearAlert = high[lbR] > vw_mfiPh_high1 and mfiVal[lbR] < vw_mfiPh_mfi1 and mfiPhFound and inRangeMfiPh
-mfiHidBullAlert = low[lbR] > vw_mfiPl_low1 and mfiVal[lbR] < vw_mfiPl_mfi1 and mfiPlFound and inRangeMfiPl
-mfiHidBearAlert = high[lbR] < vw_mfiPh_high1 and mfiVal[lbR] > vw_mfiPh_mfi1 and mfiPhFound and inRangeMfiPh
+mfiBullAlert = low[lbR] < ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
+mfiBearAlert = high[lbR] > ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
+mfiHidBullAlert = low[lbR] > ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
+mfiHidBearAlert = high[lbR] < ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
 
 // --- RSI 价格动能 (保留 5 根 K 线确认) ---
-rsiBullAlert = low[lbR] < vw_pl_low1 and osc[lbR] > vw_pl_osc1 and plFound and inRangePl
-rsiBearAlert = high[lbR] > vw_ph_high1 and osc[lbR] < vw_ph_osc1 and phFound and inRangePh
-rsiHidBullAlert = low[lbR] > vw_pl_low1 and osc[lbR] < vw_pl_osc1 and plFound and inRangePl
-rsiHidBearAlert = high[lbR] < vw_ph_high1 and osc[lbR] > vw_ph_osc1 and phFound and inRangePh
+rsiBullAlert = low[lbR] < ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
+rsiBearAlert = high[lbR] > ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
+rsiHidBullAlert = low[lbR] > ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
+rsiHidBearAlert = high[lbR] < ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
 
 // --- MACD(Hist) 砸盘加速度 (实时化改造) ---
 macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
@@ -148,7 +135,6 @@ isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0
 isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0
 
 // ==================== 视觉引擎：绘图与标签 ====================
-
 plotshape(showLagging and plotBull and rsiBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
 plotshape(showLagging and plotBull and rsiBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI底", text = " RSI底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
 
@@ -189,7 +175,6 @@ fill(obLevel, osLevel, title="背景填充", color=color.rgb(33, 149, 243, 85))
 rsiColor = osc >= rsiOverbought ? bearColor : osc <= rsiOversold ? bullColor : #2962FF
 plot(osc, title="RSI", linewidth=2, color=rsiColor)
 
-// ==================== 实时共振背景报警逻辑 ====================
 topScore = (atrPercent >= 80 ? 1 : 0) + (osc >= rsiOverbought ? 1 : 0) + (macdTurnDown and macdHist > 0 ? 1 : 0) + (cciVal >= cciExtremeOB ? 1 : 0) + (mfiVal >= 80 ? 1 : 0)
 botScore = (atrPercent >= 80 ? 1 : 0) + (osc <= rsiOversold ? 1 : 0) + (macdTurnUp and macdHist < 0 ? 1 : 0) + (cciVal <= cciExtremeOS ? 1 : 0) + (mfiVal <= 20 ? 1 : 0)
 
@@ -208,8 +193,14 @@ alertcondition(macdHidBearAlert, "【先锋实时】Hist 隐藏顶背离", "动�
 alertcondition(rsiBullAlert and isMfiBullSync, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
 alertcondition(rsiBearAlert and isMfiBearSync, "【梯队1】RSI + MFI 共振顶", "强烈看跌！")
 
+alertcondition(rsiHidBullAlert and isMfiHidBullSync, "【梯队1】RSI + MFI 隐藏共振底", "隐藏看涨 (趋势延续)！")
+alertcondition(rsiHidBearAlert and isMfiHidBearSync, "【梯队1】RSI + MFI 隐藏共振顶", "隐藏看跌 (趋势延续)！")
+
 alertcondition(rsiBullAlert, "【梯队2】RSI 独立底背离", "动能衰竭")
 alertcondition(rsiBearAlert, "【梯队2】RSI 独立顶背离", "动能衰竭")
+
+alertcondition(rsiHidBullAlert, "【梯队2】RSI 隐藏底背离", "隐藏看涨 (趋势延续)")
+alertcondition(rsiHidBearAlert, "【梯队2】RSI 隐藏顶背离", "隐藏看跌 (趋势延续)")
 
 alertcondition(mfiBullAlert, "【梯队3】MFI 独立底背离 (资金潜伏)", "潜伏底(MFI背离)！")
 alertcondition(mfiBearAlert, "【梯队3】MFI 独立顶背离 (资金撤退)", "撤退顶(MFI背离)！")
@@ -223,27 +214,20 @@ else if atrPanelPosStr == "右下角"
 else if atrPanelPosStr == "左下角"
     panelPos := position.bottom_left
 
-// 严格按照需求调整为: 3列 x 2行
 var table atrTable = table.new(panelPos, 3, 2, bgcolor=color.new(color.black, 40), border_width=1, border_color=color.new(color.gray, 60))
 
 if showAtrPanel and barstate.islast
-    // 乘数计算
     atrStopDist = atr * atrMult
-    
-    // 占总价的百分比计算
     atrBaseRatio = (atr / close) * 100
     atrRatio = (atrStopDist / close) * 100
     
-    // 将 绝对数值 和 (百分比) 拼接成一个字符串，放在第 3 列
     baseStr = str.tostring(atr, "#.####") + " (" + str.tostring(atrBaseRatio, "#.##") + "%)"
     targetStr = str.tostring(atrStopDist, "#.####") + " (" + str.tostring(atrRatio, "#.##") + "%)"
     
-    // --- 第 1 行：基准 ATR 参考 ---
     table.cell(atrTable, 0, 0, "实时 ATR", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 0, baseStr, text_color=color.gray, text_size=size.small, text_halign=text.align_right)
     
-    // --- 第 2 行：目标动态止损 ---
     table.cell(atrTable, 0, 1, "目标止损", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 1, targetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
