@@ -356,3 +356,70 @@ if triggerAvwapReset and showAvwap
               color=color.new(avwapC, 70), textcolor=color.white, yloc=yloc.price)
 
 //---------------------------------------------------------------------------------------------------------------------}
+// ====================================================================================================================}
+// 升级版：左侧阶梯抄底目标价 (寻找最近的两个 POC)
+// ===================================================================================================================={
+float poc1 = na // 最近的 POC
+float poc2 = na // 第二近的 POC
+float dist1 = 999999.0
+float dist2 = 999999.0
+
+// 1. 遍历寻找最近的两个支撑位
+if untestedPocs.size() > 0
+    for i = 0 to untestedPocs.size() - 1
+        UntestedPOC p = untestedPocs.get(i)
+        if p.price < close 
+            float dist = close - p.price
+            if dist < dist1
+                // 发现更近的，把原来的第一近退位成第二近
+                dist2 := dist1
+                poc2 := poc1
+                // 更新第一近
+                dist1 := dist
+                poc1 := p.price
+            else if dist < dist2 and p.price != poc1
+                // 更新第二近
+                dist2 := dist
+                poc2 := p.price
+
+// 2. 分别计算两个梯队的抄底目标价 (POC - 1倍14周期ATR)
+float target1 = na
+float target2 = na
+if not na(poc1)
+    target1 := poc1 - globalAtr14
+if not na(poc2)
+    target2 := poc2 - globalAtr14
+
+// 3. 绘制在图表上 (不同颜色区分)
+plot(target1, title="抄底目标 1 (最近POC-ATR)", color=color.new(color.aqua, 20), style=plot.style_circles, linewidth=2)
+plot(target2, title="抄底目标 2 (次近POC-ATR)", color=color.new(color.blue, 20), style=plot.style_circles, linewidth=2)
+
+// 4. 实盘盯盘面板 (扩展为多行显示)
+var table targetTable = table.new(position.bottom_right, 3, 3, bgcolor=color.new(color.black, 40), border_color=color.new(color.gray, 60), border_width=1)
+
+if barstate.islast
+    // 表头
+    table.cell(targetTable, 0, 0, "阶梯抄底", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(targetTable, 1, 0, "未测试POC", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+    table.cell(targetTable, 2, 0, "入场目标价", text_color=color.white, text_size=size.small, text_halign=text.align_right)
+    
+    // T1 梯队
+    if not na(target1)
+        table.cell(targetTable, 0, 1, "目标 1 (近)", text_color=color.aqua, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 1, str.tostring(poc1, format.mintick), text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 1, str.tostring(target1, format.mintick), text_color=color.aqua, text_size=size.small, text_halign=text.align_right)
+    else
+        table.cell(targetTable, 0, 1, "目标 1 (近)", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 1, 1, "--", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 2, 1, "--", text_color=color.gray, text_size=size.small)
+
+    // T2 梯队
+    if not na(target2)
+        table.cell(targetTable, 0, 2, "目标 2 (深)", text_color=color.blue, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 2, str.tostring(poc2, format.mintick), text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 2, str.tostring(target2, format.mintick), text_color=color.blue, text_size=size.small, text_halign=text.align_right)
+    else
+        table.cell(targetTable, 0, 2, "目标 2 (深)", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 1, 2, "--", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 2, 2, "--", text_color=color.gray, text_size=size.small)
+// ====================================================================================================================}
