@@ -225,8 +225,8 @@ if showAtrPanel and barstate.islast
     targetStr = str.tostring(atrStopDist, "#.####") + " (" + str.tostring(atrRatio, "#.##") + "%)"
     
     table.cell(atrTable, 0, 0, "实时 ATR", text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
-    table.cell(atrTable, 2, 0, baseStr, text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+    table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+    table.cell(atrTable, 2, 0, baseStr, text_color=color.rgb(252, 253, 255), text_size=size.small, text_halign=text.align_right)
     
     table.cell(atrTable, 0, 1, "目标止损", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
@@ -236,5 +236,5 @@ if showAtrPanel and barstate.islast
 backtest_atrStopDist = atr * atrMult
 
 // 使用 display.data_window 使得数据只在侧边栏的数据窗口显示，不在主图上画线
-plot(showAtrPanel ? atr : na, title="【回测】当日 ATR (1.0倍)", color=color.gray, style=plot.style_stepline, display=display.data_window)
+plot(showAtrPanel ? atr : na, title="【回测】当日 ATR (1.0倍)", color=color.rgb(255, 255, 255), style=plot.style_stepline, display=display.data_window)
 plot(showAtrPanel ? backtest_atrStopDist : na, title="【回测】当日 目标止损距离", color=color.yellow, style=plot.style_stepline, display=display.data_window)
