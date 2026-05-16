@@ -400,26 +400,26 @@ var table targetTable = table.new(position.bottom_right, 3, 3, bgcolor=color.new
 if barstate.islast
     // 表头
     table.cell(targetTable, 0, 0, "阶梯抄底", text_color=color.white, text_size=size.small, text_halign=text.align_left)
-    table.cell(targetTable, 1, 0, "未测试POC", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+    table.cell(targetTable, 1, 0, "未测试POC", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(targetTable, 2, 0, "入场目标价", text_color=color.white, text_size=size.small, text_halign=text.align_right)
     
     // T1 梯队
     if not na(target1)
         table.cell(targetTable, 0, 1, "目标 1 (近)", text_color=color.aqua, text_size=size.small, text_halign=text.align_left)
-        table.cell(targetTable, 1, 1, str.tostring(poc1, format.mintick), text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 1, 1, str.tostring(poc1, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
         table.cell(targetTable, 2, 1, str.tostring(target1, format.mintick), text_color=color.aqua, text_size=size.small, text_halign=text.align_right)
     else
-        table.cell(targetTable, 0, 1, "目标 1 (近)", text_color=color.gray, text_size=size.small)
-        table.cell(targetTable, 1, 1, "--", text_color=color.gray, text_size=size.small)
-        table.cell(targetTable, 2, 1, "--", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 0, 1, "目标 1 (近)", text_color=color.rgb(255, 255, 255), text_size=size.small)
+        table.cell(targetTable, 1, 1, "--", text_color=color.rgb(255, 255, 255), text_size=size.small)
+        table.cell(targetTable, 2, 1, "--", text_color=color.rgb(254, 254, 255), text_size=size.small)
 
     // T2 梯队
     if not na(target2)
         table.cell(targetTable, 0, 2, "目标 2 (深)", text_color=color.blue, text_size=size.small, text_halign=text.align_left)
-        table.cell(targetTable, 1, 2, str.tostring(poc2, format.mintick), text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 1, 2, str.tostring(poc2, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
         table.cell(targetTable, 2, 2, str.tostring(target2, format.mintick), text_color=color.blue, text_size=size.small, text_halign=text.align_right)
     else
-        table.cell(targetTable, 0, 2, "目标 2 (深)", text_color=color.gray, text_size=size.small)
-        table.cell(targetTable, 1, 2, "--", text_color=color.gray, text_size=size.small)
-        table.cell(targetTable, 2, 2, "--", text_color=color.gray, text_size=size.small)
+        table.cell(targetTable, 0, 2, "目标 2 (深)", text_color=color.rgb(252, 253, 255), text_size=size.small)
+        table.cell(targetTable, 1, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small)
+        table.cell(targetTable, 2, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small)
 // ====================================================================================================================}
