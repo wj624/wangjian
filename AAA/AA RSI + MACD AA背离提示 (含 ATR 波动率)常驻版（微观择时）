@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含VW-KDJ模块)", shorttitle="四维共振+VW波段", format=format.price)
+indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含VW-KDJ模块) 完美清查版", shorttitle="四维共振+VW波段", format=format.price)
 
 // ==================== 1. 基础输入参数 ====================
 len = input.int(14, "RSI 周期", minval=1, group="1. RSI 参数设置")
@@ -59,7 +59,6 @@ vwObLevel = input.int(80, "超买警戒线 (可适当下调至75)", minval=50, m
 vwOsLevel = input.int(20, "超卖警戒线 (可适当上调至25)", minval=0, maxval=50, group="10. VW-KDJ 资金波段 (附属模块)")
 vwUseVwmaSrc = input.bool(true, "源数据使用3日资金均价", tooltip="开启后，计算RSV的基础价格将采用3日加权价，有效屏蔽主力尾盘微量画线骗局。", group="10. VW-KDJ 资金波段 (附属模块)")
 
-
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
 bullColor = color.green
@@ -80,7 +79,7 @@ atrPercent = (atr - atrMin) / math.max(atrMax - atrMin, 0.000001) * 100
 normalizedAtr = (atrPercent / 100) * atrMaxHeight
 atrColor = atrPercent >= 80 ? color.new(color.orange, 60) : atrPercent <= 20 ? color.new(color.green, 60) : color.new(#787B86, 80)
 
-// ==================== VW-KDJ 核心算法 (完全隔离域) ====================
+// ==================== VW-KDJ 核心算法 ====================
 vwSafeVol = na(volume) or volume == 0 ? 1 : volume
 custom_vwma(src_val, length) =>
     math.sum(src_val * vwSafeVol, length) / math.max(math.sum(vwSafeVol, length), 1e-10)
@@ -94,8 +93,8 @@ vwVar2 = custom_vwma(vwRsv, vwSmooth1)
 vwVar3 = custom_vwma(vwVar2, vwSmooth2)  // 波
 vwVar4 = custom_vwma(vwVar3, vwSmooth3)  // 段
 
-vwBuyCond = ta.crossover(vwVar3, vwVar4) and vwVar3[1] < vwOsLevel
-vwSellCond = ta.crossunder(vwVar3, vwVar4) and vwVar3[1] > vwObLevel
+vwBuyCond = ta.crossover(vwVar3, vwVar4) and vwVar3[1] < vwOsLevel and not na(vwVar3) and not na(vwVar4)
+vwSellCond = ta.crossunder(vwVar3, vwVar4) and vwVar3[1] > vwObLevel and not na(vwVar3) and not na(vwVar4)
 
 // ==================== 绝对坐标测距与枢轴 ====================
 plFound = not na(ta.pivotlow(osc, lbL, lbR))
@@ -114,7 +113,7 @@ inRangePh = _inRange(phFound)
 inRangeMfiPl = _inRange(mfiPlFound)
 inRangeMfiPh = _inRange(mfiPhFound)
 
-// ==================== 指标独立背离状态提取 ====================
+// ==================== 独立背离计算 ====================
 mfiBullAlert = low[lbR] < ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
 mfiBearAlert = high[lbR] > ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
 mfiHidBullAlert = low[lbR] > ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
@@ -125,12 +124,10 @@ rsiBearAlert = high[lbR] > ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] < ta
 rsiHidBullAlert = low[lbR] > ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
 rsiHidBearAlert = high[lbR] < ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
 
+// MACD 先锋实时动态判定 (消除 low[1] 的滑点延迟)
 macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
 macdTurnDown = macdHist < macdHist[1] and macdHist[1] > macdHist[2]
-currMacdLow = low[1]
-currMacdHistLow = macdHist[1]
-currMacdHigh = high[1]
-currMacdHistHigh = macdHist[1]
+
 prevMacdPlLow = ta.valuewhen(macdPlFound, low[lbR], 0)
 prevMacdPlHist = ta.valuewhen(macdPlFound, macdHist[lbR], 0)
 prevMacdPhHigh = ta.valuewhen(macdPhFound, high[lbR], 0)
@@ -141,15 +138,16 @@ inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
 distMacdPhAgg = ta.barssince(macdPhFound) + lbR
 inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
 
-macdBullAlert = macdTurnUp and currMacdLow < prevMacdPlLow and currMacdHistLow > prevMacdPlHist and inRangeMacdPlAgg and currMacdHistLow < 0
-macdBearAlert = macdTurnDown and currMacdHigh > prevMacdPhHigh and currMacdHistHigh < prevMacdPhHist and inRangeMacdPhAgg and currMacdHistHigh > 0
-macdHidBullAlert = macdTurnUp and currMacdLow > prevMacdPlLow and currMacdHistLow < prevMacdPlHist and inRangeMacdPlAgg and currMacdHistLow < 0
-macdHidBearAlert = macdTurnDown and currMacdHigh < prevMacdPhHigh and currMacdHistHigh > prevMacdPhHist and inRangeMacdPhAgg and currMacdHistHigh > 0
+macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
+macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
+macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
+macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
 
-isMfiBullSync = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1) > 0
-isMfiBearSync = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1) > 0
-isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0
-isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0
+// 时序同步：向后平移 lbR 帧对齐历史发生的 MFI 独立背离
+isMfiBullSync = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
+isMfiBearSync = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
+isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
+isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
 
 // ==================== 视觉引擎：四维共振绘图 ====================
 plotshape(showLagging and plotBull and rsiBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
@@ -164,22 +162,23 @@ plotshape(showLagging and plotBear and rsiBearAlert and not isMfiBearSync ? osc[
 plotshape(showLagging and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏顶", text = " RSI+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
 plotshape(showLagging and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏顶", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
 
+// 视觉Bug修复：将纯 MFI 标签坐标严格向后投影，避免 Y 轴死死贴底
 mfiPureBull = mfiBullAlert and not rsiBullAlert and not macdBullAlert
 mfiPureBear = mfiBearAlert and not rsiBearAlert and not macdBearAlert
-plotshape(showLagging and mfiPureBull, offset = -lbR, title="纯MFI资金底", text=" 潜伏底(MFI背离) ", style=shape.labelup, location=location.bottom, color=mfiColor, textcolor=textColor, size=size.small, display=display.pane)
-plotshape(showLagging and mfiPureBear, offset = -lbR, title="纯MFI资金顶", text=" 撤退顶(MFI背离) ", style=shape.labeldown, location=location.top, color=mfiColor, textcolor=textColor, size=size.small, display=display.pane)
+plotshape(showLagging and mfiPureBull ? osc[lbR] : na, offset = -lbR, title="纯MFI资金底", text=" 潜伏底(MFI背离) ", style=shape.labelup, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
+plotshape(showLagging and mfiPureBear ? osc[lbR] : na, offset = -lbR, title="纯MFI资金顶", text=" 撤退顶(MFI背离) ", style=shape.labeldown, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
 
-plotshape(showRealTime and plotMacdBull and macdBullAlert ? osc[1] : na, offset = -1, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdHiddenBull and macdHidBullAlert ? osc[1] : na, offset = -1, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdBear and macdBearAlert ? osc[1] : na, offset = -1, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdHiddenBear and macdHidBearAlert ? osc[1] : na, offset = -1, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 30), textcolor = textColor, size = size.small)
+plotshape(showRealTime and plotMacdBull and macdBullAlert ? osc : na, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(showRealTime and plotMacdHiddenBull and macdHidBullAlert ? osc : na, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(showRealTime and plotMacdBear and macdBearAlert ? osc : na, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 20), textcolor = textColor, size = size.small)
+plotshape(showRealTime and plotMacdHiddenBear and macdHidBearAlert ? osc : na, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 30), textcolor = textColor, size = size.small)
 
-plotshape(showRealTime and ta.crossover(mfiVal, 80), title="MFI超买", style=shape.circle, location=location.top, color=color.new(mfiColor, 20), size=size.tiny, display=display.pane)
-plotshape(showRealTime and ta.crossunder(mfiVal, 20), title="MFI超卖", style=shape.circle, location=location.bottom, color=color.new(mfiColor, 20), size=size.tiny, display=display.pane)
-plotshape(showRealTime and cciVal >= cciExtremeOB, title="CCI极端偏离(顶)", style=shape.triangledown, location=location.top, color=color.new(extremeWarnColor, 20), size=size.tiny, display=display.pane)
-plotshape(showRealTime and cciVal <= cciExtremeOS, title="CCI极端偏离(底)", style=shape.triangleup, location=location.bottom, color=color.new(extremeWarnColor, 20), size=size.tiny, display=display.pane)
+plotshape(showRealTime and ta.crossover(mfiVal, 80), title="MFI超买", style=shape.circle, location=location.top, color=color.new(mfiColor, 20), size=size.tiny)
+plotshape(showRealTime and ta.crossunder(mfiVal, 20), title="MFI超卖", style=shape.circle, location=location.bottom, color=color.new(mfiColor, 20), size=size.tiny)
+plotshape(showRealTime and cciVal >= cciExtremeOB, title="CCI极端偏离(顶)", style=shape.triangledown, location=location.top, color=color.new(extremeWarnColor, 20), size=size.tiny)
+plotshape(showRealTime and cciVal <= cciExtremeOS, title="CCI极端偏离(底)", style=shape.triangleup, location=location.bottom, color=color.new(extremeWarnColor, 20), size=size.tiny)
 
-// ==================== 辅助绘图 (共振指标基底) ===================
+// ==================== 辅助绘图 ===================
 plot(showAtr ? normalizedAtr : na, title="ATR 波动率", style=plot.style_columns, color=atrColor)
 
 hline(50, title="中轴线", color=color.rgb(247, 0, 0), linestyle=hline.style_dotted, linewidth=2)
@@ -198,17 +197,14 @@ botBgColor = botScore == 5 ? color.new(#4caf4f, 0) : botScore == 4 ? color.new(#
 bgcolor(showBgAlert and topScore >= 3 ? topBgColor : na, title="多维极值共振顶背景")
 bgcolor(showBgAlert and botScore >= 3 ? botBgColor : na, title="多维极值共振底背景")
 
-// ==================== 视觉引擎：VW-KDJ 动态绘图 ====================
-// 为保证不干扰主图，使用 plot 代替 hline 以实现条件渲染
+// ==================== VW-KDJ 动态绘图 ====================
 plot(showVwKdj ? vwVar3 : na, color=color.rgb(0, 213, 255), linewidth=2, title="VW-KDJ 波")
 plot(showVwKdj ? vwVar4 : na, color=color.rgb(255, 152, 0), linewidth=2, title="VW-KDJ 段")
+plot(showVwKdj ? 50 : na, title="VW 多空分界", color=color.new(color.gray, 50), style=plot.style_circles)
 
-// 修复补回：50 中轴多空分界线
-plot(showVwKdj ? 50 : na, title="VW 多空分界", color=color.new(color.gray, 50), style=plot.style_circles, display=display.pane)
-
-p_vwOB  = plot(showVwKdj ? vwObLevel : na, title="VW 超买边界", color=color.new(color.red, 50), style=plot.style_circles, display=display.pane)
+p_vwOB  = plot(showVwKdj ? vwObLevel : na, title="VW 超买边界", color=color.new(color.red, 50), style=plot.style_circles)
 p_vw100 = plot(showVwKdj ? 100 : na, display=display.none)
-p_vwOS  = plot(showVwKdj ? vwOsLevel : na, title="VW 超卖边界", color=color.new(color.green, 50), style=plot.style_circles, display=display.pane)
+p_vwOS  = plot(showVwKdj ? vwOsLevel : na, title="VW 超卖边界", color=color.new(color.green, 50), style=plot.style_circles)
 p_vw0   = plot(showVwKdj ? 0 : na, display=display.none)
 
 fill(p_vwOB, p_vw100, color=showVwKdj ? color.new(color.red, 90) : na, title="VW 超买区背景")
@@ -217,32 +213,23 @@ fill(p_vw0, p_vwOS, color=showVwKdj ? color.new(color.green, 90) : na, title="VW
 plotshape(showVwKdj and vwBuyCond, title="VW 抄底标签", text="抄底", style=shape.triangleup, location=location.bottom, color=color.green, textcolor=color.green, size=size.small)
 plotshape(showVwKdj and vwSellCond, title="VW 逃顶标签", text="逃顶", style=shape.triangledown, location=location.top, color=color.red, textcolor=color.red, size=size.small)
 
-
-// ==================== 实盘报警库 (整合版) ====================
+// ==================== 实盘报警库 ====================
 alertcondition(macdBullAlert, "【先锋实时】Hist 底背离", "动能衰竭 (0延迟抓点)！")
 alertcondition(macdBearAlert, "【先锋实时】Hist 顶背离", "动能衰竭 (0延迟抓点)！")
 alertcondition(macdHidBullAlert, "【先锋实时】Hist 隐藏底背离", "动能衰竭 (0延迟抓点)！")
 alertcondition(macdHidBearAlert, "【先锋实时】Hist 隐藏顶背离", "动能衰竭 (0延迟抓点)！")
-
 alertcondition(rsiBullAlert and isMfiBullSync, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
 alertcondition(rsiBearAlert and isMfiBearSync, "【梯队1】RSI + MFI 共振顶", "强烈看跌！")
-
 alertcondition(rsiHidBullAlert and isMfiHidBullSync, "【梯队1】RSI + MFI 隐藏共振底", "隐藏看涨 (趋势延续)！")
 alertcondition(rsiHidBearAlert and isMfiHidBearSync, "【梯队1】RSI + MFI 隐藏共振顶", "隐藏看跌 (趋势延续)！")
-
 alertcondition(rsiBullAlert, "【梯队2】RSI 独立底背离", "动能衰竭")
 alertcondition(rsiBearAlert, "【梯队2】RSI 独立顶背离", "动能衰竭")
-
 alertcondition(rsiHidBullAlert, "【梯队2】RSI 隐藏底背离", "隐藏看涨 (趋势延续)")
 alertcondition(rsiHidBearAlert, "【梯队2】RSI 隐藏顶背离", "隐藏看跌 (趋势延续)")
-
 alertcondition(mfiBullAlert, "【梯队3】MFI 独立底背离 (资金潜伏)", "潜伏底(MFI背离)！")
 alertcondition(mfiBearAlert, "【梯队3】MFI 独立顶背离 (资金撤退)", "撤退顶(MFI背离)！")
-
-// VW-KDJ 专属报警
 alertcondition(vwBuyCond, title="【资金波段】VW-KDJ 抄底信号", message="波段极值低位 + 资金爆量拐头，抄底！")
 alertcondition(vwSellCond, title="【资金波段】VW-KDJ 逃顶信号", message="波段极值高位 + 资金撤退拐头，逃顶！") 
-
 
 // ==================== 悬浮 ATR 止损面板 ====================
 var string panelPos = position.top_right
@@ -271,7 +258,7 @@ if showAtrPanel and barstate.islast
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 1, targetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
 
-// ==================== 回测专用：数据窗口跟随显示 ====================
+// 数据窗口跟随显示 (排除 barstate.islast 阻断，使历史周期数据流平滑显示)
 backtest_atrStopDist = atr * atrMult
 backtest_priceMinusAtr = close - atr
 backtest_priceMinusTarget = close - backtest_atrStopDist
