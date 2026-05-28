@@ -1,5 +1,5 @@
 //@version=6
-indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含VW-KDJ模块) 完美清查版", shorttitle="四维共振+VW波段", format=format.price)
+indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含顾比中轴带与VW-KDJ) 精准终极版", shorttitle="四维共振+顾比中轴+VW", format=format.price)
 
 // ==================== 1. 基础输入参数 ====================
 len = input.int(14, "RSI 周期", minval=1, group="1. RSI 参数设置")
@@ -49,6 +49,10 @@ showAtrPanel = input.bool(true, "显示 ATR 止损参考面板", group="9. 止�
 atrPanelPosStr = input.string("右上角", "面板位置", options=["右上角", "左上角", "右下角", "左下角"], group="9. 止损参考信息 (ATR数据)")
 atrMult = input.float(2.0, "ATR 止损倍数 (1-4)", minval=1.0, maxval=4.0, step=0.5, group="9. 止损参考信息 (ATR数据)")
 
+// 均线风控看板输入配置
+maLen = input.int(60, "均线止损周期", minval=1, group="9.1 均线止损参考设置")
+maType = input.string("EMA", "均线类型", options=["EMA", "SMA"], group="9.1 均线止损参考设置")
+
 // ==================== 10. 融合模块：VW-KDJ 资金波段雷达 ====================
 showVwKdj = input.bool(false, "【开关】显示 VW-KDJ 资金波段", group="10. VW-KDJ 资金波段 (附属模块)")
 vwLookback = input.int(36, "极值回溯周期 (N)", minval=1, group="10. VW-KDJ 资金波段 (附属模块)")
@@ -58,6 +62,11 @@ vwSmooth3  = input.int(3, "资金平滑 3 (段 M3)", minval=1, group="10. VW-KDJ
 vwObLevel = input.int(80, "超买警戒线 (可适当下调至75)", minval=50, maxval=100, group="10. VW-KDJ 资金波段 (附属模块)")
 vwOsLevel = input.int(20, "超卖警戒线 (可适当上调至25)", minval=0, maxval=50, group="10. VW-KDJ 资金波段 (附属模块)")
 vwUseVwmaSrc = input.bool(true, "源数据使用3日资金均价", tooltip="开启后，计算RSV的基础价格将采用3日加权价，有效屏蔽主力尾盘微量画线骗局。", group="10. VW-KDJ 资金波段 (附属模块)")
+
+// ==================== 11. 顾比均线（GMMA）中轴参数与震荡优化 ====================
+showGmmaBand = input.bool(true, "【开关】显示中轴顾比动能背景带", group="11. 顾比均线（GMMA）中轴参数")
+gmmaSrc = input(close, "顾比均线数据源", group="11. 顾比均线（GMMA）中轴参数")
+entangleThreshold = input.int(28, "震荡区强行捕获阈值 [0-46]", tooltip="数值越大，对震荡缠绕的捕获越敏感，中轴变黄的 range 就越宽。建议范围: 20-35", group="11. 顾比均线（GMMA）中轴参数")
 
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
@@ -79,22 +88,73 @@ atrPercent = (atr - atrMin) / math.max(atrMax - atrMin, 0.000001) * 100
 normalizedAtr = (atrPercent / 100) * atrMaxHeight
 atrColor = atrPercent >= 80 ? color.new(color.orange, 60) : atrPercent <= 20 ? color.new(color.green, 60) : color.new(#787B86, 80)
 
+// 全局均线与乖离安全计算
+maEma = ta.ema(close, maLen)
+maSma = ta.sma(close, maLen)
+maVal = maType == "EMA" ? maEma : maSma
+maDist = close - maVal
+maRatio = (maDist / math.max(close, 1e-10)) * 100
+
+// ==================== 顾比均线拓扑矩阵核心算法 ====================
+gS1 = ta.ema(gmmaSrc, 3), gS2 = ta.ema(gmmaSrc, 5), gS3 = ta.ema(gmmaSrc, 8)
+gS4 = ta.ema(gmmaSrc, 10), gS5 = ta.ema(gmmaSrc, 12), gS6 = ta.ema(gmmaSrc, 15)
+
+gL1 = ta.ema(gmmaSrc, 30), gL2 = ta.ema(gmmaSrc, 35), gL3 = ta.ema(gmmaSrc, 40)
+gL4 = ta.ema(gmmaSrc, 45), gL5 = ta.ema(gmmaSrc, 50), gL6 = ta.ema(gmmaSrc, 60)
+
+crossScore = 0
+crossScore := crossScore + (gS1 > gL1 ? 1 : -1) + (gS1 > gL2 ? 1 : -1) + (gS1 > gL3 ? 1 : -1) + (gS1 > gL4 ? 1 : -1) + (gS1 > gL5 ? 1 : -1) + (gS1 > gL6 ? 1 : -1)
+crossScore := crossScore + (gS2 > gL1 ? 1 : -1) + (gS2 > gL2 ? 1 : -1) + (gS2 > gL3 ? 1 : -1) + (gS2 > gL4 ? 1 : -1) + (gS2 > gL5 ? 1 : -1) + (gS2 > gL6 ? 1 : -1)
+crossScore := crossScore + (gS3 > gL1 ? 1 : -1) + (gS3 > gL2 ? 1 : -1) + (gS3 > gL3 ? 1 : -1) + (gS3 > gL4 ? 1 : -1) + (gS3 > gL5 ? 1 : -1) + (gS3 > gL6 ? 1 : -1)
+crossScore := crossScore + (gS4 > gL1 ? 1 : -1) + (gS4 > gL2 ? 1 : -1) + (gS4 > gL3 ? 1 : -1) + (gS4 > gL4 ? 1 : -1) + (gS4 > gL5 ? 1 : -1) + (gS4 > gL6 ? 1 : -1)
+crossScore := crossScore + (gS5 > gL1 ? 1 : -1) + (gS5 > gL2 ? 1 : -1) + (gS5 > gL3 ? 1 : -1) + (gS5 > gL4 ? 1 : -1) + (gS5 > gL5 ? 1 : -1) + (gS5 > gL6 ? 1 : -1)
+crossScore := crossScore + (gS6 > gL1 ? 1 : -1) + (gS6 > gL2 ? 1 : -1) + (gS6 > gL3 ? 1 : -1) + (gS6 > gL4 ? 1 : -1) + (gS6 > gL5 ? 1 : -1) + (gS6 > gL6 ? 1 : -1)
+
+shortOrder = (gS1 > gS2 ? 1 : -1) + (gS2 > gS3 ? 1 : -1) + (gS3 > gS4 ? 1 : -1) + (gS4 > gS5 ? 1 : -1) + (gS5 > gS6 ? 1 : -1)
+longOrder  = (gL1 > gL2 ? 1 : -1) + (gL2 > gL3 ? 1 : -1) + (gL3 > gL4 ? 1 : -1) + (gL4 > gL5 ? 1 : -1) + (gL5 > gL6 ? 1 : -1)
+
+gmmaNetScore = crossScore + shortOrder + longOrder
+
+longMax = math.max(gL1, math.max(gL2, math.max(gL3, math.max(gL4, math.max(gL5, gL6)))))
+longMin = math.min(gL1, math.min(gL2, math.min(gL3, math.min(gL4, math.min(gL5, gL6)))))
+longWidth = longMax - longMin
+avgLongWidth = ta.sma(longWidth, 100)
+isLongContracted = longWidth < (avgLongWidth * 0.6)
+
+normalizedScore = ((gmmaNetScore + 46) / 92) * 100
+
+color dynamicGmmaColor = na
+if math.abs(gmmaNetScore) <= entangleThreshold or isLongContracted
+    yellowRatio = (gmmaNetScore + entangleThreshold) / (entangleThreshold * 2)
+    dynamicGmmaColor := color.from_gradient(yellowRatio * 100, 0, 100, color.new(#ffaa00, 30), color.new(#bbff00, 48))
+else
+    if gmmaNetScore > 0
+        bullRatio = (gmmaNetScore - entangleThreshold) / (46 - entangleThreshold)
+        dynamicGmmaColor := color.from_gradient(bullRatio * 100, 0, 100, color.new(#80c904, 35), color.new(#00bd0d, 15))
+    else
+        bearRatio = (math.abs(gmmaNetScore) - entangleThreshold) / (46 - entangleThreshold)
+        dynamicGmmaColor := color.from_gradient(bearRatio * 100, 0, 100, color.new(#ff6a00, 35), color.new(#ff1100, 15))
+
 // ==================== VW-KDJ 核心算法 ====================
 vwSafeVol = na(volume) or volume == 0 ? 1 : volume
 custom_vwma(src_val, length) =>
     math.sum(src_val * vwSafeVol, length) / math.max(math.sum(vwSafeVol, length), 1e-10)
 
-vwSrc = vwUseVwmaSrc ? custom_vwma(close, 3) : close
+vwma3 = custom_vwma(close, 3)
+vwSrc = vwUseVwmaSrc ? vwma3 : close
 vwHh = ta.highest(high, vwLookback)
 vwLl = ta.lowest(low, vwLookback)
 vwRsv = (vwSrc - vwLl) / math.max(vwHh - vwLl, 1e-10) * 100
 
 vwVar2 = custom_vwma(vwRsv, vwSmooth1)
-vwVar3 = custom_vwma(vwVar2, vwSmooth2)  // 波
-vwVar4 = custom_vwma(vwVar3, vwSmooth3)  // 段
+vwVar3 = custom_vwma(vwVar2, vwSmooth2)  
+vwVar4 = custom_vwma(vwVar3, vwSmooth3)  
 
-vwBuyCond = ta.crossover(vwVar3, vwVar4) and vwVar3[1] < vwOsLevel and not na(vwVar3) and not na(vwVar4)
-vwSellCond = ta.crossunder(vwVar3, vwVar4) and vwVar3[1] > vwObLevel and not na(vwVar3) and not na(vwVar4)
+vwKdjCrossOver  = ta.crossover(vwVar3, vwVar4)
+vwKdjCrossUnder = ta.crossunder(vwVar3, vwVar4)
+
+vwBuyCond = vwKdjCrossOver and vwVar3[1] < vwOsLevel and not na(vwVar3) and not na(vwVar4)
+vwSellCond = vwKdjCrossUnder and vwVar3[1] > vwObLevel and not na(vwVar3) and not na(vwVar4)
 
 // ==================== 绝对坐标测距与枢轴 ====================
 plFound = not na(ta.pivotlow(osc, lbL, lbR))
@@ -113,18 +173,30 @@ inRangePh = _inRange(phFound)
 inRangeMfiPl = _inRange(mfiPlFound)
 inRangeMfiPh = _inRange(mfiPhFound)
 
-// ==================== 独立背离计算 ====================
-mfiBullAlert = low[lbR] < ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
-mfiBearAlert = high[lbR] > ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
-mfiHidBullAlert = low[lbR] > ta.valuewhen(mfiPlFound, low[lbR], 1) and mfiVal[lbR] < ta.valuewhen(mfiPlFound, mfiVal[lbR], 1) and mfiPlFound and inRangeMfiPl
-mfiHidBearAlert = high[lbR] < ta.valuewhen(mfiPhFound, high[lbR], 1) and mfiVal[lbR] > ta.valuewhen(mfiPhFound, mfiVal[lbR], 1) and mfiPhFound and inRangeMfiPh
+// 将背离逻辑所需的 valuewhen 状态提前全局化提取，彻底封死因短路求值引发的 CW10002 警告
+history_mfiPl_low  = ta.valuewhen(mfiPlFound, low[lbR], 1)
+history_mfiPl_mfi  = ta.valuewhen(mfiPlFound, mfiVal[lbR], 1)
+history_mfiPh_high = ta.valuewhen(mfiPhFound, high[lbR], 1)
+history_mfiPh_mfi  = ta.valuewhen(mfiPhFound, mfiVal[lbR], 1)
 
-rsiBullAlert = low[lbR] < ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
-rsiBearAlert = high[lbR] > ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
-rsiHidBullAlert = low[lbR] > ta.valuewhen(plFound, low[lbR], 1) and osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and plFound and inRangePl
-rsiHidBearAlert = high[lbR] < ta.valuewhen(phFound, high[lbR], 1) and osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and phFound and inRangePh
+history_rsiPl_low  = ta.valuewhen(plFound, low[lbR], 1)
+history_rsiPl_osc  = ta.valuewhen(plFound, osc[lbR], 1)
+history_rsiPh_high = ta.valuewhen(phFound, high[lbR], 1)
+history_rsiPh_osc  = ta.valuewhen(phFound, osc[lbR], 1)
 
-// MACD 先锋实时动态判定 (消除 low[1] 的滑点延迟)
+// ==================== 核心独立背离计算 ====================
+mfiBullAlert = mfiPlFound and inRangeMfiPl and low[lbR] < history_mfiPl_low and mfiVal[lbR] > history_mfiPl_mfi
+mfiBearAlert = mfiPhFound and inRangeMfiPh and high[lbR] > history_mfiPh_high and mfiVal[lbR] < history_mfiPh_mfi
+mfiHidBullAlert = mfiPlFound and inRangeMfiPl and low[lbR] > history_mfiPl_low and mfiVal[lbR] < history_mfiPl_mfi
+mfiHidBearAlert = mfiPhFound and inRangeMfiPh and high[lbR] < history_mfiPh_high and mfiVal[lbR] > history_mfiPh_mfi
+
+// 💡 ⚡【已完全修复拼写漏洞】把行为杂词 "behavior =" 变回了标准的逻辑连接词 "and"
+rsiBullAlert = plFound and inRangePl and low[lbR] < history_rsiPl_low and osc[lbR] > history_rsiPl_osc
+rsiBearAlert = phFound and inRangePh and high[lbR] > history_rsiPh_high and osc[lbR] < history_rsiPh_osc
+rsiHidBullAlert = plFound and inRangePl and low[lbR] > history_rsiPl_low and osc[lbR] < history_rsiPl_osc
+rsiHidBearAlert = phFound and inRangePh and high[lbR] < history_rsiPh_high and osc[lbR] > history_rsiPh_osc
+
+// MACD 先锋动态判定
 macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
 macdTurnDown = macdHist < macdHist[1] and macdHist[1] > macdHist[2]
 
@@ -143,43 +215,78 @@ macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPh
 macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
 macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
 
-// 时序同步：向后平移 lbR 帧对齐历史发生的 MFI 独立背离
-isMfiBullSync = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
-isMfiBearSync = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
-isMfiHidBullSync = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
-isMfiHidBearSync = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1) > 0 or math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1)[lbR] > 0
+mfiBullCount    = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1)
+mfiBearCount    = math.sum(mfiBearAlert ? 1 : 0, syncWindow + 1)
+mfiHidBullCount = math.sum(mfiHidBullAlert ? 1 : 0, syncWindow + 1)
+mfiHidBearCount = math.sum(mfiHidBearAlert ? 1 : 0, syncWindow + 1)
 
-// ==================== 视觉引擎：四维共振绘图 ====================
-plotshape(showLagging and plotBull and rsiBullAlert and isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
-plotshape(showLagging and plotBull and rsiBullAlert and not isMfiBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI底", text = " RSI底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+isMfiBullSync    = mfiBullCount > 0 or mfiBullCount[lbR] > 0
+isMfiBearSync    = mfiBearCount > 0 or mfiBearCount[lbR] > 0
+isMfiHidBullSync = mfiHidBullCount > 0 or mfiHidBullCount[lbR] > 0
+isMfiHidBearSync = mfiHidBearCount > 0 or mfiHidBearCount[lbR] > 0
 
-plotshape(showLagging and plotHiddenBull and rsiHidBullAlert and isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏底", text = " RSI+MFI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
-plotshape(showLagging and plotHiddenBull and rsiHidBullAlert and not isMfiHidBullSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏底", text = " RSI隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 60), textcolor = textColor, size = size.small)
-
-plotshape(showLagging and plotBear and rsiBearAlert and isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI顶", text = " RSI+MFI顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
-plotshape(showLagging and plotBear and rsiBearAlert and not isMfiBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI顶", text = " RSI顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 50), textcolor = textColor, size = size.small)
-
-plotshape(showLagging and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏顶", text = " RSI+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
-plotshape(showLagging and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏顶", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
-
-// 视觉Bug修复：将纯 MFI 标签坐标严格向后投影，避免 Y 轴死死贴底
 mfiPureBull = mfiBullAlert and not rsiBullAlert and not macdBullAlert
 mfiPureBear = mfiBearAlert and not rsiBearAlert and not macdBearAlert
-plotshape(showLagging and mfiPureBull ? osc[lbR] : na, offset = -lbR, title="纯MFI资金底", text=" 潜伏底(MFI背离) ", style=shape.labelup, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
-plotshape(showLagging and mfiPureBear ? osc[lbR] : na, offset = -lbR, title="纯MFI资金顶", text=" 撤退顶(MFI背离) ", style=shape.labeldown, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
 
-plotshape(showRealTime and plotMacdBull and macdBullAlert ? osc : na, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdHiddenBull and macdHidBullAlert ? osc : na, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdBear and macdBearAlert ? osc : na, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 20), textcolor = textColor, size = size.small)
-plotshape(showRealTime and plotMacdHiddenBear and macdHidBearAlert ? osc : na, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 30), textcolor = textColor, size = size.small)
+mfiObCross = ta.crossover(mfiVal, 80)
+mfiOsCross = ta.crossunder(mfiVal, 20)
 
-plotshape(showRealTime and ta.crossover(mfiVal, 80), title="MFI超买", style=shape.circle, location=location.top, color=color.new(mfiColor, 20), size=size.tiny)
-plotshape(showRealTime and ta.crossunder(mfiVal, 20), title="MFI超卖", style=shape.circle, location=location.bottom, color=color.new(mfiColor, 20), size=size.tiny)
-plotshape(showRealTime and cciVal >= cciExtremeOB, title="CCI极端偏离(顶)", style=shape.triangledown, location=location.top, color=color.new(extremeWarnColor, 20), size=size.tiny)
-plotshape(showRealTime and cciVal <= cciExtremeOS, title="CCI极端偏离(底)", style=shape.triangleup, location=location.bottom, color=color.new(extremeWarnColor, 20), size=size.tiny)
+// ==================== 视觉条件布尔解耦安全过滤库 ====================
+plotRsiMfiBot     = showLagging and plotBull and rsiBullAlert and isMfiBullSync
+plotRsiBotOnly    = showLagging and plotBull and rsiBullAlert and not isMfiBullSync
+plotRsiMfiHidBot  = showLagging and plotHiddenBull and rsiHidBullAlert and isMfiHidBullSync
+plotRsiHidBotOnly = showLagging and plotHiddenBull and rsiHidBullAlert and not isMfiHidBullSync
 
-// ==================== 辅助绘图 ===================
+plotRsiMfiTop     = showLagging and plotBear and rsiBearAlert and isMfiBearSync
+plotRsiTopOnly    = showLagging and plotBear and rsiBearAlert and not isMfiBearSync
+plotRsiMfiHidTop  = showLagging and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync
+plotRsiHidTopOnly = showLagging and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync
+
+plotMfiPureBot = showLagging and mfiPureBull
+plotMfiPureTop = showLagging and mfiPureBear
+
+plotMacdBot    = showRealTime and plotMacdBull and macdBullAlert
+plotMacdHidBot = showRealTime and plotMacdHiddenBull and macdHidBullAlert
+plotMacdTop    = showRealTime and plotMacdBear and macdBearAlert
+plotMacdHidTop = showRealTime and plotMacdHiddenBear and macdHidBearAlert
+
+plotMfiObCircle = showRealTime and mfiObCross
+plotMfiOsCircle = showRealTime and mfiOsCross
+plotCciObExtrem = showRealTime and cciVal >= cciExtremeOB
+plotCciOsExtrem = showRealTime and cciVal <= cciExtremeOS
+
+// ==================== 视觉引擎：四维共振绘图 ====================
+plotshape(plotRsiMfiBot ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI底", text = " RSI+MFI底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotRsiBotOnly ? osc[lbR] : na, offset = -lbR, title = "RSI底", text = " RSI底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotRsiMfiHidBot ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏底", text = " RSI+MFI隐藏底 ", style = shape.labelup, location = location.absolute, color = bullColor, textcolor = textColor, size = size.normal)
+plotshape(plotRsiHidBotOnly ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏底", text = " RSI隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 60), textcolor = textColor, size = size.small)
+
+plotshape(plotRsiMfiTop ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI顶", text = " RSI+MFI顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotRsiTopOnly ? osc[lbR] : na, offset = -lbR, title = "RSI顶", text = " RSI顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 50), textcolor = textColor, size = size.small)
+
+plotshape(plotRsiMfiHidTop ? osc[lbR] : na, offset = -lbR, title = "RSI+MFI隐藏顶", text = " RSI+MFI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = bearColor, textcolor = textColor, size = size.normal)
+plotshape(plotRsiHidTopOnly ? osc[lbR] : na, offset = -lbR, title = "RSI隐藏顶", text = " RSI隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 60), textcolor = textColor, size = size.small)
+
+plotshape(plotMfiPureBot ? osc[lbR] : na, offset = -lbR, title="纯MFI资金底", text=" 潜伏底(MFI背离) ", style=shape.labelup, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
+plotshape(plotMfiPureTop ? osc[lbR] : na, offset = -lbR, title="纯MFI资金顶", text=" 撤退顶(MFI背离) ", style=shape.labeldown, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
+
+plotshape(plotMacdBot ? osc : na, title = "MACD底", text = " Hist底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(plotMacdHidBot ? osc : na, title = "MACD隐藏底", text = " Hist隐藏底 ", style = shape.labelup, location = location.absolute, color = color.new(bullColor, 20), textcolor = textColor, size = size.small)
+plotshape(plotMacdTop ? osc : na, title = "MACD顶", text = " Hist顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 20), textcolor = textColor, size = size.small)
+plotshape(plotMacdHidTop ? osc : na, title = "MACD隐藏顶", text = " Hist隐藏顶 ", style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 30), textcolor = textColor, size = size.small)
+
+plotshape(plotMfiObCircle, title="MFI超买", style=shape.circle, location=location.top, color=color.new(mfiColor, 20), size=size.tiny)
+plotshape(plotMfiOsCircle, title="MFI超卖", style=shape.circle, location=location.bottom, color=color.new(mfiColor, 20), size=size.tiny)
+plotshape(plotCciObExtrem, title="CCI极端偏离(顶)", style=shape.triangledown, location=location.top, color=color.new(extremeWarnColor, 20), size=size.tiny)
+plotshape(plotCciOsExtrem, title="CCI极端偏离(底)", style=shape.triangleup, location=location.bottom, color=color.new(extremeWarnColor, 20), size=size.tiny)
+
+// ==================== 辅助绘图与顾比中轴带渲染 ===================
 plot(showAtr ? normalizedAtr : na, title="ATR 波动率", style=plot.style_columns, color=atrColor)
+
+p_midUpper = plot(showGmmaBand ? 55 : na, title="顾比带上沿", display=display.none)
+p_midLower = plot(showGmmaBand ? 45 : na, title="顾比带下沿", display=display.none)
+fill(p_midUpper, p_midLower, color=showGmmaBand ? dynamicGmmaColor : na, title="中轴顾比均线动能带")
 
 hline(50, title="中轴线", color=color.rgb(247, 0, 0), linestyle=hline.style_dotted, linewidth=2)
 obLevelLine = hline(rsiOverbought, title="超买线", color=#787B86, linestyle=hline.style_dotted)
@@ -240,7 +347,7 @@ else if atrPanelPosStr == "右下角"
 else if atrPanelPosStr == "左下角"
     panelPos := position.bottom_left
 
-var table atrTable = table.new(panelPos, 3, 2, bgcolor=color.new(color.black, 40), border_width=1, border_color=color.new(color.gray, 60))
+var table atrTable = table.new(panelPos, 3, 3, bgcolor=color.new(color.black, 40), border_width=1, border_color=color.new(color.gray, 60))
 
 if showAtrPanel and barstate.islast
     atrStopDist = atr * atrMult
@@ -250,6 +357,10 @@ if showAtrPanel and barstate.islast
     baseStr = str.tostring(atr, "#.####") + " (" + str.tostring(atrBaseRatio, "#.##") + "%)"
     targetStr = str.tostring(atrStopDist, "#.####") + " (" + str.tostring(atrRatio, "#.##") + "%)"
     
+    maPriceStr = str.tostring(maVal, "#.####")
+    maDiffStr = str.tostring(maDist, "#.####") + " (" + str.tostring(maRatio, "#.##") + "%)"
+    color maInfoColor = maDist >= 0 ? color.rgb(12, 255, 20) : color.rgb(255, 0, 0)
+
     table.cell(atrTable, 0, 0, "实时 ATR", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 0, baseStr, text_color=color.rgb(252, 253, 255), text_size=size.small, text_halign=text.align_right)
@@ -258,12 +369,20 @@ if showAtrPanel and barstate.islast
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 1, targetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
 
-// 数据窗口跟随显示 (排除 barstate.islast 阻断，使历史周期数据流平滑显示)
+    table.cell(atrTable, 0, 2, str.tostring(maLen) + "日" + maType, text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(atrTable, 1, 2, maPriceStr, text_color=color.rgb(0, 247, 255), text_size=size.small, text_halign=text.align_center)
+    table.cell(atrTable, 2, 2, maDiffStr, text_color=maInfoColor, text_size=size.small, text_halign=text.align_right)
+
+// ==================== 数据窗口跟随显示 ====================
 backtest_atrStopDist = atr * atrMult
 backtest_priceMinusAtr = close - atr
 backtest_priceMinusTarget = close - backtest_atrStopDist
 
 plot(showAtrPanel ? atr : na, title="【回测】当日 ATR (1.0倍)", color=color.rgb(255, 255, 255), style=plot.style_stepline, display=display.data_window)
 plot(showAtrPanel ? backtest_atrStopDist : na, title="【回测】当日 目标止损距离", color=color.yellow, style=plot.style_stepline, display=display.data_window)
-plot(showAtrPanel ? backtest_priceMinusAtr : na, title="【回测】收盘价 - 1倍ATR", color=color.rgb(255, 255, 255), style=plot.style_stepline, display=display.data_window)
-plot(showAtrPanel ? backtest_priceMinusTarget : na, title="【回测】收盘价 - 目标止损", color=color.yellow, style=plot.style_stepline, display=display.data_window)
+plot(showAtrPanel ? backtest_priceMinusAtr : na, title="【回测】止损目标1、收盘价 - 1倍ATR", color=color.rgb(255, 255, 255), style=plot.style_stepline, display=display.data_window)
+plot(showAtrPanel ? backtest_priceMinusTarget : na, title="【回测】止损目标2、收盘价 - 目标止损", color=color.yellow, style=plot.style_stepline, display=display.data_window)
+plot(showGmmaBand ? gmmaNetScore : na, title="【回测】顾比趋势综合净得分", color=color.fuchsia, display=display.data_window)
+plot(showAtrPanel ? maVal : na, title="【看板】参考60日止损均线价格", color=color.rgb(33, 243, 243), display=display.data_window)
+plot(showAtrPanel ? maDist : na, title="【看板】当前价距60日止损均线差价", color=color.purple, display=display.data_window)
+plot(showAtrPanel ? maRatio : na, title="【看板】当前价距60日止损均线百分比(%)", color=color.orange, display=display.data_window)
