@@ -139,7 +139,7 @@ calc_mode = input.string(
               "模式B：债务占GDP比例乘以10年国债收益率（代理利息负担），越低越好"],
      group=grp_logic)
 view_mode = input.string(
-     "利息压力指标", "曲线显示内容（4国走势图）",
+     "利息压力指标", "曲线显示内容（4国走势图）总计利息压力 = 利息压力指标 × 债务率",
      options=["总债务/GDP", "利息压力指标", "总计利息压力"],
      group=grp_logic)
 
