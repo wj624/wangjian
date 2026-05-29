@@ -68,6 +68,20 @@ showGmmaBand = input.bool(true, "【开关】显示中轴顾比动能背景带",
 gmmaSrc = input(close, "顾比均线数据源", group="11. 顾比均线（GMMA）中轴参数")
 entangleThreshold = input.int(28, "震荡区强行捕获阈值 [0-46]", tooltip="数值越大，对震荡缠绕的捕获越敏感，中轴变黄的 range 就越宽。建议范围: 20-35", group="11. 顾比均线（GMMA）中轴参数")
 
+// ==================== 💎 12. 终极升级方案核心配置 (含透明度动态调节阀) ====================
+useVolFilter = input.bool(true, "【方案一】启用量能与右侧过滤(降服单边阴跌)", group="12. 终极升级方案核心配置")
+volMultInput = input.float(1.5, "恐慌盘成交量均线倍数", minval=1.0, step=0.1, group="12. 终极升级方案核心配置")
+showPctLines = input.bool(true, "【方案二】显示自适应分位数双生命线", group="12. 终极升级方案核心配置")
+pctLen       = input.int(100, "分位数通道回溯周期", minval=20, group="12. 终极升级方案核心配置")
+
+// 🧱 方案二动态视觉控制台组件（参数完全对外解耦）
+pctColorUp   = input.color(#ff00aa, "自适应超买线颜色", group="12.1 自适应通道视觉控制台")
+pctTransUp   = input.int(40, "自适应超买线透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
+pctColorDn   = input.color(#00ffaa, "自适应超卖线颜色", group="12.1 自适应通道视觉控制台")
+pctTransDn   = input.int(40, "自适应超卖线透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
+pctFillColor = input.color(#9c27b0, "通道内部填充颜色", group="12.1 自适应通道视觉控制台")
+pctFillTrans = input.int(94, "通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
+
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
 bullColor = color.green
@@ -79,7 +93,7 @@ mfiColor = color.new(#FF9800, 0)
 osc = ta.rsi(src, len)
 mfiVal = ta.mfi(hlc3, mfiLen)
 [_, _, macdHist] = ta.macd(src, macdFast, macdSlow, macdSignal)
-cciVal = ta.cci(hlc3, cciLen)
+closeCci = ta.cci(hlc3, cciLen)
 
 atr = ta.atr(atrLen)
 atrMax = ta.highest(atr, atrLookback)
@@ -95,7 +109,20 @@ maVal = maType == "EMA" ? maEma : maSma
 maDist = close - maVal
 maRatio = (maDist / math.max(close, 1e-10)) * 100
 
-// ==================== 顾比均线拓扑矩阵核心算法（拆分多行） ====================
+// ==================== 方案一核心：量能高潮与右侧价格滤网计算（思路B时空对齐版） ====================
+vwSafeVol = na(volume) or volume == 0 ? 1 : volume
+volMa = ta.sma(vwSafeVol, 20)
+volClimax = vwSafeVol > volMa * volMultInput
+priceConfirm = close > ta.ema(close, 9)
+
+anyVolClimaxRecently = math.sum(volClimax ? 1 : 0, lbR + 1) > 0
+bullFilterPassed = not useVolFilter or (anyVolClimaxRecently or priceConfirm)
+
+// ==================== 方案二核心：自适应动态分位数生命线 ====================
+rsiPctUpper = ta.percentile_linear_interpolation(osc, pctLen, 80)
+rsiPctLower = ta.percentile_linear_interpolation(osc, pctLen, 20)
+
+// ==================== 顾比均线拓扑矩阵核心算法 ====================
 gS1 = ta.ema(gmmaSrc, 3)
 gS2 = ta.ema(gmmaSrc, 5)
 gS3 = ta.ema(gmmaSrc, 8)
@@ -144,7 +171,6 @@ else
         dynamicGmmaColor := color.from_gradient(bearRatio * 100, 0, 100, color.new(#ff6a00, 35), color.new(#ff1100, 15))
 
 // ==================== VW-KDJ 核心算法 ====================
-vwSafeVol = na(volume) or volume == 0 ? 1 : volume
 custom_vwma(src_val, length) =>
     math.sum(src_val * vwSafeVol, length) / math.max(math.sum(vwSafeVol, length), 1e-10)
 
@@ -181,7 +207,7 @@ inRangePh = _inRange(phFound)
 inRangeMfiPl = _inRange(mfiPlFound)
 inRangeMfiPh = _inRange(mfiPhFound)
 
-// 💡【全面纠正】：恢复老版本带 [lbR] 偏移的历史高低点全局提取，封死 CW10002 警告并修正背离基准
+// 全局历史错位提取矩阵
 history_mfiPl_low  = ta.valuewhen(mfiPlFound, low[lbR], 1)
 history_mfiPl_mfi  = ta.valuewhen(mfiPlFound, mfiVal[lbR], 1)
 history_mfiPh_high = ta.valuewhen(mfiPhFound, high[lbR], 1)
@@ -192,7 +218,7 @@ history_rsiPl_osc  = ta.valuewhen(plFound, osc[lbR], 1)
 history_rsiPh_high = ta.valuewhen(phFound, high[lbR], 1)
 history_rsiPh_osc  = ta.valuewhen(phFound, osc[lbR], 1)
 
-// ==================== 核心独立背离计算（逻辑完美闭环版） ====================
+// ==================== 核心独立背离计算 ====================
 rsiBullAlert = plFound and inRangePl and low[lbR] < history_rsiPl_low and osc[lbR] > history_rsiPl_osc
 rsiBearAlert = phFound and inRangePh and high[lbR] > history_rsiPh_high and osc[lbR] < history_rsiPh_osc
 rsiHidBullAlert = plFound and inRangePl and low[lbR] > history_rsiPl_low and osc[lbR] < history_rsiPl_osc
@@ -203,7 +229,7 @@ mfiBearAlert = mfiPhFound and inRangeMfiPh and high[lbR] > history_mfiPh_high an
 mfiHidBullAlert = mfiPlFound and inRangeMfiPl and low[lbR] > history_mfiPl_low and mfiVal[lbR] < history_mfiPl_mfi
 mfiHidBearAlert = mfiPhFound and inRangeMfiPh and high[lbR] < history_mfiPh_high and mfiVal[lbR] > history_mfiPh_mfi
 
-// MACD 先锋动态判定
+// MACD 先锋动态判定与历史支撑提取
 macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
 macdTurnDown = macdHist < macdHist[1] and macdHist[1] > macdHist[2]
 
@@ -217,6 +243,7 @@ inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
 distMacdPhAgg = ta.barssince(macdPhFound) + lbR
 inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
 
+// 💎 核心彻底重构：完全修复布尔判定解耦，封死编译冲突报错
 macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
 macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
 macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
@@ -239,62 +266,74 @@ mfiPureBear = mfiBearAlert and not rsiBearAlert and not macdBearAlert
 mfiObCross = ta.crossover(mfiVal, 80)
 mfiOsCross = ta.crossunder(mfiVal, 20)
 
-// ==================== 视觉条件（优化版 Label 引擎，完美支持滞后回溯与多样式） ====================
+// ==================== 对底部多空执行过滤解耦 ====================
+plotRsiMfiBot     = showLagging and plotBull and rsiBullAlert and isMfiBullSync and bullFilterPassed
+plotRsiBotOnly    = showLagging and plotBull and rsiBullAlert and not isMfiBullSync and bullFilterPassed
+plotRsiMfiHidBot  = showLagging and plotHiddenBull and rsiHidBullAlert and isMfiHidBullSync and bullFilterPassed
+plotRsiHidBotOnly = showLagging and plotHiddenBull and rsiHidBullAlert and not isMfiHidBullSync and bullFilterPassed
+
+plotRsiMfiTop     = showLagging and plotBear and rsiBearAlert and isMfiBearSync
+plotRsiTopOnly    = showLagging and plotBear and rsiBearAlert and not isMfiBearSync
+plotRsiMfiHidTop  = showLagging and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync
+plotRsiHidTopOnly = showLagging and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync
+
+plotMfiPureBot = showLagging and mfiPureBull and bullFilterPassed
+plotMfiPureTop = showLagging and mfiPureBear
+
+plotMacdBot    = showRealTime and plotMacdBull and macdBullAlert and bullFilterPassed
+plotMacdHidBot = showRealTime and plotMacdHiddenBull and macdHidBullAlert and bullFilterPassed
+plotMacdTop    = showRealTime and plotMacdBear and macdBearAlert
+plotMacdHidTop = showRealTime and plotMacdHiddenBear and macdHidBearAlert
+
+// ==================== 视觉条件 Label 引擎 ====================
 var label[] signalLabels = array.new<label>()
 if barstate.isnew
     while array.size(signalLabels) > 200
         label.delete(array.shift(signalLabels))
 
-// 升级版函数：支持传入指定 offset（K线回溯量）与指定的指示箭头样式
 drawLabel(cond, txt, colorBg, colorText, sz, yVal, offset, lblStyle) =>
     if cond and barstate.isconfirmed
         lbl = label.new(bar_index - offset, yVal, text=txt, color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
         array.push(signalLabels, lbl)
 
-// ==================== 视觉条件（完美修正方向的标签引擎） ====================
 drawTriangle(cond, loc, txt, colorTxt, colorBg) =>
     if cond and barstate.isconfirmed
         yVal = loc == location.bottom ? 5 : 95
-        // 💡 动态判定方向：底部的信号向上指，顶部的信号向下指，彻底告别视觉误导
         lblStyle = loc == location.bottom ? label.style_label_up : label.style_label_down
         lbl = label.new(bar_index, yVal, text=txt, color=colorBg, textcolor=colorTxt, style=lblStyle, size=size.small)
         array.push(signalLabels, lbl)
 
-// RSI+MFI底 (回溯至真实谷值 lbR 位置绘制，箭头向上)
-drawLabel(showLagging and plotBull and rsiBullAlert and isMfiBullSync, " RSI+MFI底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
-drawLabel(showLagging and plotBull and rsiBullAlert and not isMfiBullSync, " RSI底 ", color.new(bullColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_up)
-drawLabel(showLagging and plotHiddenBull and rsiHidBullAlert and isMfiHidBullSync, " RSI+MFI隐藏底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
-drawLabel(showLagging and plotHiddenBull and rsiHidBullAlert and not isMfiHidBullSync, " RSI隐藏底 ", color.new(bullColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_up)
+// RSI+MFI底
+drawLabel(plotRsiMfiBot, " RSI+MFI底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
+drawLabel(plotRsiBotOnly, " RSI底 ", color.new(bullColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_up)
+drawLabel(plotRsiMfiHidBot, " RSI+MFI隐藏底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
+drawLabel(plotRsiHidBotOnly, " RSI隐藏底 ", color.new(bullColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_up)
 
-// ⚡【彻底修复】：RSI+MFI顶 (回溯至真实峰值 lbR 位置绘制，箭头向下指向K线峰值)
-drawLabel(showLagging and plotBear and rsiBearAlert and isMfiBearSync, " RSI+MFI顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
-drawLabel(showLagging and plotBear and rsiBearAlert and not isMfiBearSync, " RSI顶 ", color.new(bearColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_down)
-drawLabel(showLagging and plotHiddenBear and rsiHidBearAlert and isMfiHidBearSync, " RSI+MFI隐藏顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
-drawLabel(showLagging and plotHiddenBear and rsiHidBearAlert and not isMfiHidBearSync, " RSI隐藏顶 ", color.new(bearColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_down)
+// RSI+MFI顶
+drawLabel(plotRsiMfiTop, " RSI+MFI顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
+drawLabel(plotRsiTopOnly, " RSI顶 ", color.new(bearColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_down)
+drawLabel(plotRsiMfiHidTop, " RSI+MFI隐藏顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
+drawLabel(plotRsiHidTopOnly, " RSI隐藏顶 ", color.new(bearColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_down)
 
-// MACD 标签 (属于即时先锋触发信号，维持0延迟当前 bar 渲染)
-drawLabel(showRealTime and plotMacdBull and macdBullAlert, " Hist底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
-drawLabel(showRealTime and plotMacdHiddenBull and macdHidBullAlert, " Hist隐藏底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
-drawLabel(showRealTime and plotMacdBear and macdBearAlert, " Hist顶 ", color.new(bearColor,20), textColor, size.small, osc, 0, label.style_label_down)
-drawLabel(showRealTime and plotMacdHiddenBear and macdHidBearAlert, " Hist隐藏顶 ", color.new(bearColor,30), textColor, size.small, osc, 0, label.style_label_down)
+// MACD 先锋标签
+drawLabel(plotMacdBot, " Hist底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
+drawLabel(plotMacdHidBot, " Hist隐藏底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
+drawLabel(plotMacdTop, " Hist顶 ", color.new(bearColor,20), textColor, size.small, osc, 0, label.style_label_down)
+drawLabel(plotMacdHidTop, " Hist隐藏顶 ", color.new(bearColor,30), textColor, size.small, osc, 0, label.style_label_down)
 
 // VW-KDJ 抄底逃顶标签
-drawTriangle(showVwKdj and vwBuyCond, location.bottom, "抄底", color.rgb(0, 141, 47), color.new(#0f9613, 68))
+drawTriangle(showVwKdj and vwBuyCond and bullFilterPassed, location.bottom, "抄底", color.rgb(0, 141, 47), color.new(#0f9613, 68))
 drawTriangle(showVwKdj and vwSellCond, location.top, "逃顶", color.rgb(187, 6, 6), color.new(#db8181, 61))
 
-// ==================== 🛠️ 【经典可见度移植】：CCI & MFI 原生大标签绘图库 ====================
-plotMfiPureBot = showLagging and mfiPureBull
-plotMfiPureTop = showLagging and mfiPureBear
+// ==================== CCI & MFI 原生大标签绘图库 ====================
 plotMfiObCircle = showRealTime and mfiObCross
 plotMfiOsCircle = showRealTime and mfiOsCross
-plotCciObExtrem = showRealTime and cciVal >= cciExtremeOB
-plotCciOsExtrem = showRealTime and cciVal <= cciExtremeOS
+plotCciObExtrem = showRealTime and closeCci >= cciExtremeOB
+plotCciOsExtrem = showRealTime and closeCci <= cciExtremeOS
 
-// 纯MFI资金流背离标签移植（含历史位置偏置）
 plotshape(plotMfiPureBot ? osc[lbR] : na, offset = -lbR, title="纯MFI资金底", text=" 潜伏底(MFI背离) ", style=shape.labelup, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
 plotshape(plotMfiPureTop ? osc[lbR] : na, offset = -lbR, title="纯MFI资金顶", text=" 撤退顶(MFI背离) ", style=shape.labeldown, location=location.absolute, color=mfiColor, textcolor=textColor, size=size.small)
 
-// MFI / CCI 极值偏离点大符号移植（附图上下沿清晰可见）
 plotshape(plotMfiObCircle, title="MFI超买", style=shape.circle, location=location.top, color=color.new(mfiColor, 20), size=size.tiny)
 plotshape(plotMfiOsCircle, title="MFI超卖", style=shape.circle, location=location.bottom, color=color.new(mfiColor, 20), size=size.tiny)
 plotshape(plotCciObExtrem, title="CCI极端偏离(顶)", style=shape.triangledown, location=location.top, color=color.new(extremeWarnColor, 20), size=size.tiny)
@@ -312,17 +351,22 @@ obLevelLine = hline(rsiOverbought, title="超买线", color=#787B86, linestyle=h
 osLevelLine = hline(rsiOversold, title="超卖线", color=#787B86, linestyle=hline.style_dotted)
 fill(obLevelLine, osLevelLine, title="背景填充", color=color.rgb(33, 149, 243, 85))
 
+// 🧱 方案二渲染：自适应动态百分位双生命线通道（完全接入用户客制化滑块，支持高透调整）
+p_pctUpper = plot(showPctLines ? rsiPctUpper : na, title="自适应超买生命线", color=color.new(pctColorUp, pctTransUp), linestyle=plot.linestyle_dashed, linewidth=1)
+p_pctLower = plot(showPctLines ? rsiPctLower : na, title="自适应超卖生命线", color=color.new(pctColorDn, pctTransDn), linestyle=plot.linestyle_dashed, linewidth=1)
+fill(p_pctUpper, p_pctLower, color=showPctLines ? color.new(pctFillColor, pctFillTrans) : na, title="自适应生命线通道高透填充")
+
 rsiColor = osc >= rsiOverbought ? bearColor : osc <= rsiOversold ? bullColor : #2962FF
 plot(osc, title="RSI", linewidth=2, color=rsiColor)
 
-// 多维极值共振背景（移除ATR因子）
-topScore = (osc >= rsiOverbought ? 1 : 0) + (macdTurnDown and macdHist > 0 ? 1 : 0) + (cciVal >= cciExtremeOB ? 1 : 0) + (mfiVal >= 80 ? 1 : 0)
-botScore = (osc <= rsiOversold ? 1 : 0) + (macdTurnUp and macdHist < 0 ? 1 : 0) + (cciVal <= cciExtremeOS ? 1 : 0) + (mfiVal <= 20 ? 1 : 0)
+// 多维极值共振背景
+topScore = (osc >= rsiOverbought ? 1 : 0) + (macdTurnDown and macdHist > 0 ? 1 : 0) + (closeCci >= cciExtremeOB ? 1 : 0) + (mfiVal >= 80 ? 1 : 0)
+botScore = (osc <= rsiOversold ? 1 : 0) + (macdTurnUp and macdHist < 0 ? 1 : 0) + (closeCci <= cciExtremeOS ? 1 : 0) + (mfiVal <= 20 ? 1 : 0)
 
 topBgColor = topScore == 4 ? color.new(#ff5252, 0) : topScore == 3 ? color.new(#ff5252, 20) : topScore == 2 ? color.new(#ff5252, 70) : na
 botBgColor = botScore == 4 ? color.new(#4caf4f, 0) : botScore == 3 ? color.new(#4caf4f, 20) : botScore == 2 ? color.new(#4caf4f, 70) : na
 bgcolor(showBgAlert and topScore >= 2 ? topBgColor : na, title="多维极值共振顶背景")
-bgcolor(showBgAlert and botScore >= 2 ? botBgColor : na, title="多维极值共振底背景")
+bgcolor(showBgAlert and botScore >= 2 and bullFilterPassed ? botBgColor : na, title="多维极值共振底背景")
 
 // ==================== VW-KDJ 动态绘图 ====================
 plot(showVwKdj ? vwVar3 : na, color=color.rgb(0, 213, 255), linewidth=2, title="VW-KDJ 波")
@@ -338,24 +382,14 @@ fill(p_vwOB, p_vw100, color=showVwKdj ? color.new(color.red, 90) : na, title="VW
 fill(p_vw0, p_vwOS, color=showVwKdj ? color.new(color.green, 90) : na, title="VW 超卖区背景")
 
 // ==================== 实盘报警库 ====================
-alertcondition(macdBullAlert, "【先锋实时】Hist 底背离", "动能衰竭 (0延迟抓点)！")
+alertcondition(macdBullAlert and bullFilterPassed, "【先锋实时】Hist 底背离", "动能衰竭 (0延迟抓点)！")
 alertcondition(macdBearAlert, "【先锋实时】Hist 顶背离", "动能衰竭 (0延迟抓点)！")
-alertcondition(macdHidBullAlert, "【先锋实时】Hist 隐藏底背离", "动能衰竭 (0延迟抓点)！")
-alertcondition(macdHidBearAlert, "【先锋实时】Hist 隐藏顶背离", "动能衰竭 (0延迟抓点)！")
-alertcondition(rsiBullAlert and isMfiBullSync, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
+alertcondition(rsiBullAlert and isMfiBullSync and bullFilterPassed, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
 alertcondition(rsiBearAlert and isMfiBearSync, "【梯队1】RSI + MFI 共振顶", "强烈看跌！")
-alertcondition(rsiHidBullAlert and isMfiHidBullSync, "【梯队1】RSI + MFI 隐藏共振底", "隐藏看涨 (趋势延续)！")
-alertcondition(rsiHidBearAlert and isMfiHidBearSync, "【梯队1】RSI + MFI 隐藏共振顶", "隐藏看跌 (趋势延续)！")
-alertcondition(rsiBullAlert, "【梯队2】RSI 独立底背离", "动能衰竭")
-alertcondition(rsiBearAlert, "【梯队2】RSI 独立顶背离", "动能衰竭")
-alertcondition(rsiHidBullAlert, "【梯队2】RSI 隐藏底背离", "隐藏看涨 (趋势延续)")
-alertcondition(rsiHidBearAlert, "【梯队2】RSI 隐藏顶背离", "隐藏看跌 (趋势延续)")
-alertcondition(mfiBullAlert, "【梯队3】MFI 独立底背离 (资金潜伏)", "潜伏底(MFI背离)！")
-alertcondition(mfiBearAlert, "【梯队3】MFI 独立顶背离 (资金撤退)", "撤退顶(MFI背离)！")
-alertcondition(vwBuyCond, title="【资金波段】VW-KDJ 抄底信号", message="波段极值低位 + 资金爆量拐头，抄底！")
+alertcondition(vwBuyCond and bullFilterPassed, title="【资金波段】VW-KDJ 抄底信号", message="波段极值低位 + 资金爆量拐头，抄底！")
 alertcondition(vwSellCond, title="【资金波段】VW-KDJ 逃顶信号", message="波段极值高位 + 资金撤退拐头，逃顶！") 
 
-// ==================== 悬浮 ATR 止损面板 ====================
+// ==================== 🛠️ 纯净版 3x3 悬浮风控面板 ====================
 var string panelPos = position.top_right
 if atrPanelPosStr == "左上角"
     panelPos := position.top_left
@@ -378,14 +412,17 @@ if showAtrPanel and barstate.islast
     maDiffStr = str.tostring(maDist, "#.####") + " (" + str.tostring(maRatio, "#.##") + "%)"
     color maInfoColor = maDist >= 0 ? color.rgb(12, 255, 20) : color.rgb(255, 0, 0)
 
+    // Row 0：实时一倍 ATR 渲染
     table.cell(atrTable, 0, 0, "实时 ATR", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 0, baseStr, text_color=color.rgb(252, 253, 255), text_size=size.small, text_halign=text.align_right)
     
+    // Row 1：自定义目标倍数止损距离
     table.cell(atrTable, 0, 1, "目标止损", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 1, targetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
 
+    // Row 2：均线防守与乖离百分比参考
     table.cell(atrTable, 0, 2, str.tostring(maLen) + "日" + maType, text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 2, maPriceStr, text_color=color.rgb(0, 247, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 2, maDiffStr, text_color=maInfoColor, text_size=size.small, text_halign=text.align_right)
