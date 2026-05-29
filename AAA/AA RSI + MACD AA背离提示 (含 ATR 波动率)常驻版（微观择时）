@@ -68,13 +68,12 @@ showGmmaBand = input.bool(true, "【开关】显示中轴顾比动能背景带",
 gmmaSrc = input(close, "顾比均线数据源", group="11. 顾比均线（GMMA）中轴参数")
 entangleThreshold = input.int(28, "震荡区强行捕获阈值 [0-46]", tooltip="数值越大，对震荡缠绕的捕获越敏感，中轴变黄的 range 就越宽。建议范围: 20-35", group="11. 顾比均线（GMMA）中轴参数")
 
-// ==================== 💎 12. 终极升级方案核心配置 (含透明度动态调节阀) ====================
+// ==================== 💎 12. 终极升级方案核心配置 ====================
 useVolFilter = input.bool(true, "【方案一】启用量能与右侧过滤(降服单边阴跌)", group="12. 终极升级方案核心配置")
 volMultInput = input.float(1.5, "恐慌盘成交量均线倍数", minval=1.0, step=0.1, group="12. 终极升级方案核心配置")
 showPctLines = input.bool(true, "【方案二】显示自适应分位数双生命线", group="12. 终极升级方案核心配置")
 pctLen       = input.int(100, "分位数通道回溯周期", minval=20, group="12. 终极升级方案核心配置")
 
-// 🧱 方案二动态视觉控制台组件（参数完全对外解耦）
 pctColorUp   = input.color(#ff00aa, "自适应超买线颜色", group="12.1 自适应通道视觉控制台")
 pctTransUp   = input.int(40, "自适应超买线透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
 pctColorDn   = input.color(#00ffaa, "自适应超卖线颜色", group="12.1 自适应通道视觉控制台")
@@ -231,7 +230,7 @@ mfiHidBearAlert = mfiPhFound and inRangeMfiPh and high[lbR] < history_mfiPh_high
 
 // MACD 先锋动态判定与历史支撑提取
 macdTurnUp = macdHist > macdHist[1] and macdHist[1] < macdHist[2]
-macdTurnDown = macdHist < macdHist[1] and macdHist[1] > macdHist[2]
+macdTurnDown = macdHist < math.max(macdHist[1], macdHist[2]) and macdHist[1] > macdHist[2]
 
 prevMacdPlLow = ta.valuewhen(macdPlFound, low[lbR], 0)
 prevMacdPlHist = ta.valuewhen(macdPlFound, macdHist[lbR], 0)
@@ -243,7 +242,7 @@ inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
 distMacdPhAgg = ta.barssince(macdPhFound) + lbR
 inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
 
-// 💎 核心彻底重构：完全修复布尔判定解耦，封死编译冲突报错
+// 💡【全面大抢修】：彻底恢复纯正、无污染的 MACD 顶底背离以及隐藏背离计算
 macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
 macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
 macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
@@ -351,7 +350,7 @@ obLevelLine = hline(rsiOverbought, title="超买线", color=#787B86, linestyle=h
 osLevelLine = hline(rsiOversold, title="超卖线", color=#787B86, linestyle=hline.style_dotted)
 fill(obLevelLine, osLevelLine, title="背景填充", color=color.rgb(33, 149, 243, 85))
 
-// 🧱 方案二渲染：自适应动态百分位双生命线通道（完全接入用户客制化滑块，支持高透调整）
+// 🧱 方案二：自适应动态百分位双生命线通道与高透填充
 p_pctUpper = plot(showPctLines ? rsiPctUpper : na, title="自适应超买生命线", color=color.new(pctColorUp, pctTransUp), linestyle=plot.linestyle_dashed, linewidth=1)
 p_pctLower = plot(showPctLines ? rsiPctLower : na, title="自适应超卖生命线", color=color.new(pctColorDn, pctTransDn), linestyle=plot.linestyle_dashed, linewidth=1)
 fill(p_pctUpper, p_pctLower, color=showPctLines ? color.new(pctFillColor, pctFillTrans) : na, title="自适应生命线通道高透填充")
@@ -381,13 +380,32 @@ p_vw0   = plot(showVwKdj ? 0 : na, display=display.none)
 fill(p_vwOB, p_vw100, color=showVwKdj ? color.new(color.red, 90) : na, title="VW 超买区背景")
 fill(p_vw0, p_vwOS, color=showVwKdj ? color.new(color.green, 90) : na, title="VW 超卖区背景")
 
-// ==================== 实盘报警库 ====================
-alertcondition(macdBullAlert and bullFilterPassed, "【先锋实时】Hist 底背离", "动能衰竭 (0延迟抓点)！")
-alertcondition(macdBearAlert, "【先锋实时】Hist 顶背离", "动能衰竭 (0延迟抓点)！")
-alertcondition(rsiBullAlert and isMfiBullSync and bullFilterPassed, "【梯队1】RSI + MFI 共振底", "强烈看涨！")
-alertcondition(rsiBearAlert and isMfiBearSync, "【梯队1】RSI + MFI 共振顶", "强烈看跌！")
-alertcondition(vwBuyCond and bullFilterPassed, title="【资金波段】VW-KDJ 抄底信号", message="波段极值低位 + 资金爆量拐头，抄底！")
-alertcondition(vwSellCond, title="【资金波段】VW-KDJ 逃顶信号", message="波段极值高位 + 资金撤退拐头，逃顶！") 
+// ==================== 💎 经典报警控制台 (100%全要素满格回归) ====================
+// 1. MACD 动能背离系列 (加入方案一底部熔断防轰炸)
+alertcondition(macdBullAlert and bullFilterPassed, "【实时】Hist 底背离", "MACD柱动能衰竭 (0延迟抓点)！")
+alertcondition(macdBearAlert, "【实时】Hist 顶背离", "MACD柱动能衰竭 (0延迟抓点)！")
+alertcondition(macdHidBullAlert and bullFilterPassed, "【实时】Hist 隐藏底背离", "MACD动能强力多头延续！")
+alertcondition(macdHidBearAlert, "【实时】Hist 隐藏顶背离", "MACD动能强力空头延续！")
+
+// 2. 梯队 1：RSI + MFI 资金量价强共振系列
+alertcondition(rsiBullAlert and isMfiBullSync and bullFilterPassed, "【共振】RSI + MFI 强共振底", "四维核心量价极限共振，重仓狙击买入点！")
+alertcondition(rsiBearAlert and isMfiBearSync, "【共振】RSI + MFI 强共振顶", "四维核心量价极限共振，清仓撤退卖出点！")
+alertcondition(rsiHidBullAlert and isMfiHidBullSync and bullFilterPassed, "【共振】RSI + MFI 隐藏共振底", "趋势强看涨延续！")
+alertcondition(rsiHidBearAlert and isMfiHidBearSync, "【共振】RSI + MFI 隐藏共振顶", "趋势强看跌延续！")
+
+// 3. 梯队 2：RSI 独立超买超卖背离系列
+alertcondition(rsiBullAlert and bullFilterPassed, "【独立】RSI 常规底背离", "独立动能超卖衰竭")
+alertcondition(rsiBearAlert, "【独立】RSI 常规顶背离", "独立动能超买衰竭")
+alertcondition(rsiHidBullAlert and bullFilterPassed, "【独立】RSI 隐藏底背离", "顺势右侧看涨")
+alertcondition(rsiHidBearAlert, "【独立】RSI 隐藏顶背离", "顺势右侧看跌")
+
+// 4. 梯队 3：MFI 资金流独立背离系列
+alertcondition(mfiBullAlert and bullFilterPassed, "【独立】MFI 资金流底背离", "主力资金左侧异动悄悄潜伏！")
+alertcondition(mfiBearAlert, "【独立】MFI 资金流顶背离", "主力资金左侧异动悄悄撤退！")
+
+// 5. 附属模块：VW-KDJ 资金波段雷达核心信号
+alertcondition(vwBuyCond and bullFilterPassed, "【波段】VW-KDJ 机构抄底", "波段极值低位 + 资金放量拐头金叉！")
+alertcondition(vwSellCond, "【波段】VW-KDJ 机构逃顶", "波段极值高位 + 资金流出拐头死叉！") 
 
 // ==================== 🛠️ 纯净版 3x3 悬浮风控面板 ====================
 var string panelPos = position.top_right
