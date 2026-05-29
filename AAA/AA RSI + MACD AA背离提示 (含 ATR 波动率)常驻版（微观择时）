@@ -251,10 +251,13 @@ drawLabel(cond, txt, colorBg, colorText, sz, yVal, offset, lblStyle) =>
         lbl = label.new(bar_index - offset, yVal, text=txt, color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
         array.push(signalLabels, lbl)
 
+// ==================== 视觉条件（完美修正方向的标签引擎） ====================
 drawTriangle(cond, loc, txt, colorTxt, colorBg) =>
     if cond and barstate.isconfirmed
         yVal = loc == location.bottom ? 5 : 95
-        lbl = label.new(bar_index, yVal, text=txt, color=colorBg, textcolor=colorTxt, style=label.style_label_up, size=size.small)
+        // 💡 动态判定方向：底部的信号向上指，顶部的信号向下指，彻底告别视觉误导
+        lblStyle = loc == location.bottom ? label.style_label_up : label.style_label_down
+        lbl = label.new(bar_index, yVal, text=txt, color=colorBg, textcolor=colorTxt, style=lblStyle, size=size.small)
         array.push(signalLabels, lbl)
 
 // RSI+MFI底 (回溯至真实谷值 lbR 位置绘制，箭头向上)
