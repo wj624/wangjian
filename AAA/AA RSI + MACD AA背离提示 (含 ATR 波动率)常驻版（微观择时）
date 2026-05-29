@@ -68,7 +68,7 @@ showGmmaBand = input.bool(true, "【开关】显示中轴顾比动能背景带",
 gmmaSrc = input(close, "顾比均线数据源", group="11. 顾比均线（GMMA）中轴参数")
 entangleThreshold = input.int(28, "震荡区强行捕获阈值 [0-46]", tooltip="数值越大，对震荡缠绕的捕获越敏感，中轴变黄的 range 就越宽。建议范围: 20-35", group="11. 顾比均线（GMMA）中轴参数")
 
-// ==================== 💎 12. 终极升级方案核心配置 ====================
+// ==================== 12. 终极升级方案核心配置 ====================
 useVolFilter = input.bool(true, "【方案一】启用量能与右侧过滤(降服单边阴跌)", group="12. 终极升级方案核心配置")
 volMultInput = input.float(1.5, "恐慌盘成交量均线倍数", minval=1.0, step=0.1, group="12. 终极升级方案核心配置")
 showPctLines = input.bool(true, "【方案二】显示自适应分位数双生命线", group="12. 终极升级方案核心配置")
@@ -242,11 +242,10 @@ inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
 distMacdPhAgg = ta.barssince(macdPhFound) + lbR
 inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
 
-// 🧱 核心彻底修复：解除变量污染，全面重构 4 因子先锋布尔判别矩阵
-macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
-macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
-macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
-macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
+macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and math.min(macdHist, 0) == macdHist
+macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and math.max(macdHist, 0) == macdHist
+macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and math.min(macdHist, 0) == macdHist
+macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and math.max(macdHist, 0) == macdHist
 
 // MFI 容错同步
 mfiBullCount    = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1)
@@ -290,16 +289,13 @@ if barstate.isnew
     while array.size(signalLabels) > 200
         label.delete(array.shift(signalLabels))
 
+// 声明全局盘中动态追踪标签（锁定最高全局作用域执行流）
+var label liveLowTr = na
+var label liveHighTr = na
+
 drawLabel(cond, txt, colorBg, colorText, sz, yVal, offset, lblStyle) =>
     if cond and barstate.isconfirmed
         lbl = label.new(bar_index - offset, yVal, text=txt, color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
-        array.push(signalLabels, lbl)
-
-drawTriangle(cond, loc, txt, colorTxt, colorBg) =>
-    if cond and barstate.isconfirmed
-        yVal = loc == location.bottom ? 5 : 95
-        lblStyle = loc == location.bottom ? label.style_label_up : label.style_label_down
-        lbl = label.new(bar_index, yVal, text=txt, color=colorBg, textcolor=colorTxt, style=lblStyle, size=size.small)
         array.push(signalLabels, lbl)
 
 // RSI+MFI底
@@ -320,9 +316,22 @@ drawLabel(plotMacdHidBot, " Hist隐藏底 ", color.new(bullColor,20), textColor,
 drawLabel(plotMacdTop, " Hist顶 ", color.new(bearColor,20), textColor, size.small, osc, 0, label.style_label_down)
 drawLabel(plotMacdHidTop, " Hist隐藏顶 ", color.new(bearColor,30), textColor, size.small, osc, 0, label.style_label_down)
 
-// VW-KDJ 抄底逃顶标签
-drawTriangle(showVwKdj and vwBuyCond and bullFilterPassed, location.bottom, "抄底", color.rgb(0, 141, 47), color.new(#0f9613, 68))
-drawTriangle(showVwKdj and vwSellCond, location.top, "逃顶", color.rgb(187, 6, 6), color.new(#db8181, 61))
+// 🧱 核心重构：将 VW-KDJ 抄底逃顶标签完全平铺进全局执行流中，完美绕开 CE10088 作用域报错
+if showVwKdj and vwBuyCond and bullFilterPassed
+    if barstate.isconfirmed
+        lbl = label.new(bar_index, 5, text="抄底", color=color.new(#0f9613, 68), textcolor=color.rgb(0, 141, 47), style=label.style_label_up, size=size.small)
+        array.push(signalLabels, lbl)
+    else if showRealTime
+        label.delete(liveLowTr)
+        liveLowTr := label.new(bar_index, 5, text="抄底 ⏳", color=color.new(#0f9613, 68), textcolor=color.rgb(0, 141, 47), style=label.style_label_up, size=size.small)
+
+if showVwKdj and vwSellCond
+    if barstate.isconfirmed
+        lbl = label.new(bar_index, 95, text="逃顶", color=color.new(#db8181, 61), textcolor=color.rgb(187, 6, 6), style=label.style_label_down, size=size.small)
+        array.push(signalLabels, lbl)
+    else if showRealTime
+        label.delete(liveHighTr)
+        liveHighTr := label.new(bar_index, 95, text="逃顶 ⏳", color=color.new(#db8181, 61), textcolor=color.rgb(187, 6, 6), style=label.style_label_down, size=size.small)
 
 // ==================== CCI & MFI 原生大标签绘图库 ====================
 plotMfiObCircle = showRealTime and mfiObCross
@@ -350,7 +359,7 @@ obLevelLine = hline(rsiOverbought, title="超买线", color=#787B86, linestyle=h
 osLevelLine = hline(rsiOversold, title="超卖线", color=#787B86, linestyle=hline.style_dotted)
 fill(obLevelLine, osLevelLine, title="背景填充", color=color.rgb(33, 149, 243, 85))
 
-// 🧱 方案二：自适应动态百分位双生命线通道与高透填充（滑块全面对接）
+// 🧱 方案二：自适应动态百分位双生命线通道与高透填充
 p_pctUpper = plot(showPctLines ? rsiPctUpper : na, title="自适应超买生命线", color=color.new(pctColorUp, pctTransUp), linestyle=plot.linestyle_dashed, linewidth=1)
 p_pctLower = plot(showPctLines ? rsiPctLower : na, title="自适应超卖生命线", color=color.new(pctColorDn, pctTransDn), linestyle=plot.linestyle_dashed, linewidth=1)
 fill(p_pctUpper, p_pctLower, color=showPctLines ? color.new(pctFillColor, pctFillTrans) : na, title="自适应生命线通道高透填充")
@@ -381,33 +390,28 @@ fill(p_vwOB, p_vw100, color=showVwKdj ? color.new(color.red, 90) : na, title="VW
 fill(p_vw0, p_vwOS, color=showVwKdj ? color.new(color.green, 90) : na, title="VW 超卖区背景")
 
 // ==================== 💎 经典报警控制台 (16条全套监控无遗漏回归) ====================
-// 1. MACD 动能背离系列 (底部全部引入方案一熔断防骚扰)
 alertcondition(macdBullAlert and bullFilterPassed, "【实时】Hist 底背离", "MACD柱动能衰竭 (0延迟抓点)！")
 alertcondition(macdBearAlert, "【实时】Hist 顶背离", "MACD柱动能衰竭 (0延迟抓点)！")
 alertcondition(macdHidBullAlert and bullFilterPassed, "【实时】Hist 隐藏底背离", "MACD动能强力多头顺势延续！")
 alertcondition(macdHidBearAlert, "【实时】Hist 隐藏顶背离", "MACD动能强力空头顺势延续！")
 
-// 2. 梯队 1：RSI + MFI 资金量价核心共振系列
 alertcondition(rsiBullAlert and isMfiBullSync and bullFilterPassed, "【共振】RSI + MFI 强共振底", "量价极限共振，多头高质量左侧买位！")
 alertcondition(rsiBearAlert and isMfiBearSync, "【共振】RSI + MFI 强共振顶", "量价极限共振，空头高质量左侧分批卖出！")
 alertcondition(rsiHidBullAlert and isMfiHidBullSync and bullFilterPassed, "【共振】RSI + MFI 隐藏共振底", "趋势多头顺势重组延续！")
 alertcondition(rsiHidBearAlert and isMfiHidBearSync, "【共振】RSI + MFI 隐藏共振顶", "趋势空头顺势重组延续！")
 
-// 3. 梯队 2：RSI 独立超买超卖背离系列
 alertcondition(rsiBullAlert and bullFilterPassed, "【独立】RSI 常规底背离", "独立动能指标超卖衰竭")
 alertcondition(rsiBearAlert, "【独立】RSI 常规顶背离", "独立动能指标超买衰竭")
 alertcondition(rsiHidBullAlert and bullFilterPassed, "【独立】RSI 隐藏底背离", "顺势动能中轴多头洗盘结束")
 alertcondition(rsiHidBearAlert, "【独立】RSI 隐藏顶背离", "顺势动能中轴空头洗盘结束")
 
-// 4. 梯队 3：MFI 资金流独立背离系列
 alertcondition(mfiBullAlert and bullFilterPassed, "【独立】MFI 资金流底背离", "主力资金左侧异动悄悄筑底潜伏！")
 alertcondition(mfiBearAlert, "【独立】MFI 资金流顶背离", "主力资金左侧异动悄悄高位撤退！")
 
-// 5. 附属模块：VW-KDJ 资金波段雷达
 alertcondition(vwBuyCond and bullFilterPassed, "【波段】VW-KDJ 机构抄底", "波段极值超卖位 + 主力爆量金叉拐头！")
 alertcondition(vwSellCond, "【波段】VW-KDJ 机构逃顶", "波段极值超买位 + 主力撤资死叉拐头！") 
 
-// ==================== 🛠 * 纯净版 3x3 悬浮风控面板 ====================
+// ==================== 🛠️ 纯净版 3x3 悬浮风控面板 ====================
 var string panelPos = position.top_right
 if atrPanelPosStr == "左上角"
     panelPos := position.top_left
@@ -430,17 +434,17 @@ if showAtrPanel and barstate.islast
     maDiffStr = str.tostring(maDist, "#.####") + " (" + str.tostring(maRatio, "#.##") + "%)"
     color maInfoColor = maDist >= 0 ? color.rgb(12, 255, 20) : color.rgb(255, 0, 0)
 
-    // Row 0：实时一倍 ATR 渲染
+    // Row 0
     table.cell(atrTable, 0, 0, "实时 ATR", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 0, "1.0 倍", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 0, baseStr, text_color=color.rgb(252, 253, 255), text_size=size.small, text_halign=text.align_right)
     
-    // Row 1：自定义目标倍数止损距离（修复 size.yellow 常量漏洞）
+    // Row 1
     table.cell(atrTable, 0, 1, "目标止损", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 1, str.tostring(atrMult, "#.#") + " 倍", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 1, targetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
 
-    // Row 2：均线防守与乖离百分比参考
+    // Row 2
     table.cell(atrTable, 0, 2, str.tostring(maLen) + "日" + maType, text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 2, maPriceStr, text_color=color.rgb(0, 247, 255), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 2, maDiffStr, text_color=maInfoColor, text_size=size.small, text_halign=text.align_right)
