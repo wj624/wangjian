@@ -1,5 +1,6 @@
 //@version=6
-indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含顾比中轴带与VW-KDJ) 精准终极版", shorttitle="四维共振+顾比中轴+VW", format=format.price)
+// 🧱 显式开启 TradingView 平台允许的 500 个标签最大物理上限
+indicator(title="AA RSI + MACD(Hist) + MFI + CCI 四维共振 (含顾比中轴带与VW-KDJ) 精准终极版(优化版)", shorttitle="四维共振+顾比中轴+VW_Opt", format=format.price, max_labels_count=500)
 
 // ==================== 1. 基础输入参数 ====================
 len = input.int(14, "RSI 周期", minval=1, group="1. RSI 参数设置")
@@ -13,9 +14,9 @@ macdSlow = input.int(26, "MACD 慢线", group="2. MACD(Hist) 设置")
 macdSignal = input.int(9, "MACD 信号线", group="2. MACD(Hist) 设置")
 
 plotMacdBull = input.bool(true, "常规底背离检测 (MACD柱)", group="2. MACD(Hist) 设置")
-plotMacdHiddenBull = input.bool(false, "隐藏底背离检测 (MACD柱)", group="2. MACD(Hist) 设置")
+plotMacdHiddenBull = input.bool(true, "隐藏底背离检测 (MACD柱)", group="2. MACD(Hist) 设置") // 默认开启
 plotMacdBear = input.bool(true, "常规顶背离检测 (MAC柱)", group="2. MACD(Hist) 设置")
-plotMacdHiddenBear = input.bool(false, "隐藏顶背离检测 (MACD柱)", group="2. MACD(Hist) 设置")
+plotMacdHiddenBear = input.bool(true, "隐藏顶背离检测 (MACD柱)", group="2. MACD(Hist) 设置") // 默认开启
 
 lbR = input.int(5, "枢轴右视距", group="3. 枢轴结构测距设置")
 lbL = input.int(5, "枢轴左视距", group="3. 枢轴结构测距设置")
@@ -23,9 +24,9 @@ rangeUpper = input.int(60, "最大回溯范围", group="3. 枢轴结构测距设
 rangeLower = input.int(5, "最小回溯范围", group="3. 枢轴结构测距设置")
 
 plotBull = input.bool(true, "常规底背离检测 (RSI)", group="4. RSI 显示设置")
-plotHiddenBull = input.bool(false, "隐藏底背离检测 (RSI)", group="4. RSI 显示设置")
+plotHiddenBull = input.bool(true, "隐藏底背离检测 (RSI)", group="4. RSI 显示设置") // 默认开启
 plotBear = input.bool(true, "常规顶背离检测 (RSI)", group="4. RSI 显示设置")
-plotHiddenBear = input.bool(false, "隐藏顶背离检测 (RSI)", group="4. RSI 显示设置")
+plotHiddenBear = input.bool(true, "隐藏顶背离检测 (RSI)", group="4. RSI 显示设置") // 默认开启
 
 showAtr = input.bool(true, "显示 ATR 波动率", group="5. ATR 波动率设置")
 atrLen = input.int(14, "ATR 周期", group="5. ATR 波动率设置")
@@ -43,6 +44,7 @@ cciExtremeOS = input.int(-200, "CCI 极端超卖警戒线", group="7. CCI 极端
 showRealTime = input.bool(true, "【显示】实时显示指标", group="8. 视觉报警控制台 (附图开关)")
 showLagging  = input.bool(true, "【显示】滞后5K确认指标", group="8. 视觉报警控制台 (附图开关)")
 showBgAlert  = input.bool(true, "【显示】阶梯背景报警 (3档位)", group="8. 视觉报警控制台 (附图开关)")
+maxLabelCount = input.int(120, "每类标签历史留存数量", minval=10, maxval=150, tooltip="各类容器(多头/空头/波段)独立分配。120 * 3 = 360，完美处于官方500上限的绝对安全区内。", group="8. 视觉报警控制台 (附图开关)")
 
 // ==================== 9. 止损参考信息 ====================
 showAtrPanel = input.bool(true, "显示 ATR 止损参考面板", group="9. 止损参考信息 (ATR数据)")
@@ -54,7 +56,7 @@ maLen = input.int(60, "均线止损周期", minval=1, group="9.1 均线止损参
 maType = input.string("EMA", "均线类型", options=["EMA", "SMA"], group="9.1 均线止损参考设置")
 
 // ==================== 10. 融合模块：VW-KDJ 资金波段雷达 ====================
-showVwKdj = input.bool(false, "【开关】显示 VW-KDJ 资金波段", group="10. VW-KDJ 资金波段 (附属模块)")
+showVwKdj = input.bool(true, "【开关】显示 VW-KDJ 资金波段", group="10. VW-KDJ 资金波段 (附属模块)") // 默认开启
 vwLookback = input.int(36, "极值回溯周期 (N)", minval=1, group="10. VW-KDJ 资金波段 (附属模块)")
 vwSmooth1  = input.int(3, "资金平滑 1 (M1)", minval=1, group="10. VW-KDJ 资金波段 (附属模块)")
 vwSmooth2  = input.int(3, "资金平滑 2 (波 M2)", minval=1, group="10. VW-KDJ 资金波段 (附属模块)")
@@ -79,7 +81,7 @@ pctTransUp   = input.int(40, "自适应超买线透明度 [0-100]", minval=0, ma
 pctColorDn   = input.color(#00ffaa, "自适应超卖线颜色", group="12.1 自适应通道视觉控制台")
 pctTransDn   = input.int(40, "自适应超卖线透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
 pctFillColor = input.color(#9c27b0, "通道内部填充颜色", group="12.1 自适应通道视觉控制台")
-pctFillTrans = input.int(85, "通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
+pctFillTrans = input.int(80, "通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台") // 按照要求默认改为 80
 
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
@@ -242,10 +244,10 @@ inRangeMacdPlAgg = rangeLower <= distMacdPlAgg and distMacdPlAgg <= rangeUpper
 distMacdPhAgg = ta.barssince(macdPhFound) + lbR
 inRangeMacdPhAgg = rangeLower <= distMacdPhAgg and distMacdPhAgg <= rangeUpper
 
-macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and math.min(macdHist, 0) == macdHist
-macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and math.max(macdHist, 0) == macdHist
-macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and math.min(macdHist, 0) == macdHist
-macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and math.max(macdHist, 0) == macdHist
+macdBullAlert = macdTurnUp and low < prevMacdPlLow and macdHist > prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
+macdBearAlert = macdTurnDown and high > prevMacdPhHigh and macdHist < prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
+macdHidBullAlert = macdTurnUp and low > prevMacdPlLow and macdHist < prevMacdPlHist and inRangeMacdPlAgg and macdHist < 0
+macdHidBearAlert = macdTurnDown and high < prevMacdPhHigh and macdHist > prevMacdPhHist and inRangeMacdPhAgg and macdHist > 0
 
 // MFI 容错同步
 mfiBullCount    = math.sum(mfiBullAlert ? 1 : 0, syncWindow + 1)
@@ -283,55 +285,65 @@ plotMacdHidBot = showRealTime and plotMacdHiddenBull and macdHidBullAlert and bu
 plotMacdTop    = showRealTime and plotMacdBear and macdBearAlert
 plotMacdHidTop = showRealTime and plotMacdHiddenBear and macdHidBearAlert
 
-// ==================== 视觉条件 Label 引擎 ====================
-var label[] signalLabels = array.new<label>()
-if barstate.isnew
-    while array.size(signalLabels) > 200
-        label.delete(array.shift(signalLabels))
+// ==================== 🧱 历史分离容器与专属实时句柄群组 ====================
+var label[] bullLabels  = array.new<label>()
+var label[] bearLabels  = array.new<label>()
+var label[] vwKdjLabels = array.new<label>()
 
-// 声明全局盘中动态追踪标签（锁定最高全局作用域执行流）
-var label liveLowTr = na
-var label liveHighTr = na
+// 🛑 核心修复：为每一种标签配备完全独立的实时更新句柄，彻底切断串线冲突
+var label liveRsiMfiBot     = na
+var label liveRsiBotOnly    = na
+var label liveRsiMfiHidBot  = na
+var label liveRsiHidBotOnly = na
+var label liveMacdBot       = na
+var label liveMacdHidBot    = na
 
-drawLabel(cond, txt, colorBg, colorText, sz, yVal, offset, lblStyle) =>
-    if cond and barstate.isconfirmed
-        lbl = label.new(bar_index - offset, yVal, text=txt, color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
-        array.push(signalLabels, lbl)
+var label liveRsiMfiTop     = na
+var label liveRsiTopOnly    = na
+var label liveRsiMfiHidTop  = na
+var label liveRsiHidTopOnly = na
+var label liveMacdTop       = na
+var label liveMacdHidTop    = na
 
-// RSI+MFI底
-drawLabel(plotRsiMfiBot, " RSI+MFI底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
-drawLabel(plotRsiBotOnly, " RSI底 ", color.new(bullColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_up)
-drawLabel(plotRsiMfiHidBot, " RSI+MFI隐藏底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up)
-drawLabel(plotRsiHidBotOnly, " RSI隐藏底 ", color.new(bullColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_up)
+var label liveVwBuy         = na
+var label liveVwSell        = na
 
-// RSI+MFI顶
-drawLabel(plotRsiMfiTop, " RSI+MFI顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
-drawLabel(plotRsiTopOnly, " RSI顶 ", color.new(bearColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_down)
-drawLabel(plotRsiMfiHidTop, " RSI+MFI隐藏顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down)
-drawLabel(plotRsiHidTopOnly, " RSI隐藏顶 ", color.new(bearColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_down)
+executeLabelEngine(cond, txt, colorBg, colorText, sz, yVal, offset, lblStyle, container, currentHandle) =>
+    label updatedHandle = currentHandle
+    if cond
+        if barstate.isconfirmed
+            lbl = label.new(bar_index - offset, yVal, text=txt, color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
+            array.push(container, lbl)
+            while array.size(container) > maxLabelCount
+                label.delete(array.shift(container))
+        else if showRealTime
+            label.delete(currentHandle)
+            updatedHandle := label.new(bar_index - offset, yVal, text=txt + " ⏳", color=colorBg, textcolor=colorText, style=lblStyle, size=sz)
+    else if not barstate.isconfirmed
+        label.delete(currentHandle)
+        updatedHandle := na
+    updatedHandle
 
-// MACD 先锋标签
-drawLabel(plotMacdBot, " Hist底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
-drawLabel(plotMacdHidBot, " Hist隐藏底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up)
-drawLabel(plotMacdTop, " Hist顶 ", color.new(bearColor,20), textColor, size.small, osc, 0, label.style_label_down)
-drawLabel(plotMacdHidTop, " Hist隐藏顶 ", color.new(bearColor,30), textColor, size.small, osc, 0, label.style_label_down)
+// 1. 投喂 多头阵营标签 (独立物理容器通道)
+liveRsiMfiBot     := executeLabelEngine(plotRsiMfiBot, " RSI+MFI底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up, bullLabels, liveRsiMfiBot)
+liveRsiBotOnly    := executeLabelEngine(plotRsiBotOnly, " RSI底 ", color.new(bullColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_up, bullLabels, liveRsiBotOnly)
+liveRsiMfiHidBot  := executeLabelEngine(plotRsiMfiHidBot, " RSI+MFI隐藏底 ", bullColor, textColor, size.normal, osc[lbR], lbR, label.style_label_up, bullLabels, liveRsiMfiHidBot)
+liveRsiHidBotOnly := executeLabelEngine(plotRsiHidBotOnly, " RSI隐藏底 ", color.new(bullColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_up, bullLabels, liveRsiHidBotOnly)
+liveMacdBot       := executeLabelEngine(plotMacdBot, " Hist底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up, bullLabels, liveMacdBot)
+liveMacdHidBot    := executeLabelEngine(plotMacdHidBot, " Hist隐藏底 ", color.new(bullColor,20), textColor, size.small, osc, 0, label.style_label_up, bullLabels, liveMacdHidBot)
 
-// 🧱 核心重构：将 VW-KDJ 抄底逃顶标签完全平铺进全局执行流中，完美绕开 CE10088 作用域报错
-if showVwKdj and vwBuyCond and bullFilterPassed
-    if barstate.isconfirmed
-        lbl = label.new(bar_index, 5, text="抄底", color=color.new(#0f9613, 68), textcolor=color.rgb(0, 141, 47), style=label.style_label_up, size=size.small)
-        array.push(signalLabels, lbl)
-    else if showRealTime
-        label.delete(liveLowTr)
-        liveLowTr := label.new(bar_index, 5, text="抄底 ⏳", color=color.new(#0f9613, 68), textcolor=color.rgb(0, 141, 47), style=label.style_label_up, size=size.small)
+// 2. 投喂 空头阵营标签 (独立物理容器通道)
+liveRsiMfiTop     := executeLabelEngine(plotRsiMfiTop, " RSI+MFI顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down, bearLabels, liveRsiMfiTop)
+liveRsiTopOnly    := executeLabelEngine(plotRsiTopOnly, " RSI顶 ", color.new(bearColor,50), textColor, size.small, osc[lbR], lbR, label.style_label_down, bearLabels, liveRsiTopOnly)
+liveRsiMfiHidTop  := executeLabelEngine(plotRsiMfiHidTop, " RSI+MFI隐藏顶 ", bearColor, textColor, size.normal, osc[lbR], lbR, label.style_label_down, bearLabels, liveRsiMfiHidTop)
+liveRsiHidTopOnly := executeLabelEngine(plotRsiHidTopOnly, " RSI隐藏顶 ", color.new(bearColor,60), textColor, size.small, osc[lbR], lbR, label.style_label_down, bearLabels, liveRsiHidTopOnly)
+liveMacdTop       := executeLabelEngine(plotMacdTop, " Hist顶 ", color.new(bearColor,20), textColor, size.small, osc, 0, label.style_label_down, bearLabels, liveMacdTop)
+liveMacdHidTop    := executeLabelEngine(plotMacdHidTop, " Hist隐藏顶 ", color.new(bearColor,30), textColor, size.small, osc, 0, label.style_label_down, bearLabels, liveMacdHidTop)
 
-if showVwKdj and vwSellCond
-    if barstate.isconfirmed
-        lbl = label.new(bar_index, 95, text="逃顶", color=color.new(#db8181, 61), textcolor=color.rgb(187, 6, 6), style=label.style_label_down, size=size.small)
-        array.push(signalLabels, lbl)
-    else if showRealTime
-        label.delete(liveHighTr)
-        liveHighTr := label.new(bar_index, 95, text="逃顶 ⏳", color=color.new(#db8181, 61), textcolor=color.rgb(187, 6, 6), style=label.style_label_down, size=size.small)
+// 3. 投喂 VW-KDJ 专属波段通道 (隔离存放)
+liveVwBuy         := executeLabelEngine(showVwKdj and vwBuyCond and bullFilterPassed, "抄底", color.new(#0f9613, 68), color.rgb(0, 141, 47), size.small, 5, 0, label.style_label_up, vwKdjLabels, liveVwBuy)
+liveVwSell        := executeLabelEngine(showVwKdj and vwSellCond, "逃顶", color.new(#db8181, 61), color.rgb(187, 6, 6), size.small, 95, 0, label.style_label_down, vwKdjLabels, liveVwSell)
+
 
 // ==================== CCI & MFI 原生大标签绘图库 ====================
 plotMfiObCircle = showRealTime and mfiObCross
@@ -389,7 +401,7 @@ p_vw0   = plot(showVwKdj ? 0 : na, display=display.none)
 fill(p_vwOB, p_vw100, color=showVwKdj ? color.new(color.red, 90) : na, title="VW 超买区背景")
 fill(p_vw0, p_vwOS, color=showVwKdj ? color.new(color.green, 90) : na, title="VW 超卖区背景")
 
-// ==================== 💎 经典报警控制台 (16条全套监控无遗漏回归) ====================
+// ==================== 💎 经典报警控制台 ====================
 alertcondition(macdBullAlert and bullFilterPassed, "【实时】Hist 底背离", "MACD柱动能衰竭 (0延迟抓点)！")
 alertcondition(macdBearAlert, "【实时】Hist 顶背离", "MACD柱动能衰竭 (0延迟抓点)！")
 alertcondition(macdHidBullAlert and bullFilterPassed, "【实时】Hist 隐藏底背离", "MACD动能强力多头顺势延续！")
