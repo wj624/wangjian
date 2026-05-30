@@ -81,7 +81,7 @@ pctTransUp   = input.int(40, "自适应超买线透明度 [0-100]", minval=0, ma
 pctColorDn   = input.color(#00ffaa, "自适应超卖线颜色", group="12.1 自适应通道视觉控制台")
 pctTransDn   = input.int(40, "自适应超卖线透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台")
 pctFillColor = input.color(#9c27b0, "通道内部填充颜色", group="12.1 自适应通道视觉控制台")
-pctFillTrans = input.int(80, "通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台") // 按照要求默认改为 80
+pctFillTrans = input.int(70, "通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应通道视觉控制台") // 按照要求默认改为 70
 
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
