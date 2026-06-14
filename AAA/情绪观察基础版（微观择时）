@@ -40,9 +40,9 @@ cciLen = input.int(20, "CCI 周期", group="7. CCI 极端偏离刺探器")
 cciExtremeOB = input.int(200, "CCI 极端超买警戒线", group="7. CCI 极端偏离刺探器")
 cciExtremeOS = input.int(-200, "CCI 极端超卖警戒线", group="7. CCI 极端偏离刺探器")
 
-showRealTime = input.bool(true, "【显示】实时显示指标", group="8. 视觉报警控制台 (附图开关)")
+showRealTime = input.bool(true, "【显示】实时显示指标（MACD 柱背离、MFI 极端圆点、CCI 刺探三角、云图共振）", group="8. 视觉报警控制台 (附图开关)")
 showLagging  = input.bool(true, "【显示】滞后3K确认指标", group="8. 视觉报警控制台 (附图开关)")
-showBgAlert  = input.bool(true, "【显示】阶梯背景报警 (3档位)", group="8. 视觉报警控制台 (附图开关)")
+showBgAlert  = input.bool(true, "【显示】阶梯背景报警 (4档位)", group="8. 视觉报警控制台 (附图开关)")
 maxLabelCount = input.int(120, "每类标签历史留存数量", minval=10, maxval=150, tooltip="各类容器独立分配，完美处于官方500上限的绝对安全区内。", group="8. 视觉报警控制台 (附图开关)")
 
 showAtrPanel = input.bool(true, "显示 ATR/均线/筹码 风控面板", group="9. 止损参考信息 (面板设置)")
@@ -78,18 +78,28 @@ pctTransDn   = input.int(40, "RSI 自适应超卖线透明度 [0-100]", minval=0
 pctFillColor = input.color(#9c27b0, "RSI 通道内部填充颜色", group="12.1 自适应 RSI 通道视觉控制")
 pctFillTrans = input.int(70, "RSI 通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.1 自适应 RSI 通道视觉控制")
 
-mfiPctColorUp   = input.color(#ff9800, "MFI 自适应超买线颜色", group="12.2 自适应 MFI 通道视觉控制")
+mfiPctColorUp  = input.color(#ff9800, "MFI 自适应超买线颜色", group="12.2 自适应 MFI 通道视觉控制")
 mfiPctTransUp   = input.int(40, "MFI 自适应超买线透明度 [0-100]", minval=0, maxval=100, group="12.2 自适应 MFI 通道视觉控制")
 mfiPctColorDn   = input.color(#e0a800, "MFI 自适应超卖线颜色", group="12.2 自适应 MFI 通道视觉控制")
 mfiPctTransDn   = input.int(40, "MFI 自适应超卖线透明度 [0-100]", minval=0, maxval=100, group="12.2 自适应 MFI 通道视觉控制")
 mfiPctFillColor = input.color(#008cff, "MFI 通道内部填充颜色", group="12.2 自适应 MFI 通道视觉控制")
 mfiPctFillTrans = input.int(60, "MFI 通道内部填充透明度 [0-100]", minval=0, maxval=100, group="12.2 自适应 MFI 通道视觉控制")
 
-// ==================== ✨ 13. 长周期筹码与意图雷达 (二维矩阵版) ====================
+// ==================== ✨ 13. 长周期筹码与意图雷达 (自适应进化版 V2.1) ====================
 chipLen = input.int(200, "筹码分布监控周期 (日)", group="13. 长周期筹码与主力意图雷达")
-chipExtreme = input.float(20.0, "极限偏离阈值 (%)", tooltip="判定情绪泡沫或极限错杀的左侧击球区", group="13. 长周期筹码与主力意图雷达")
-chipThreshold = input.float(8.0, "常规偏离阈值 (%)", tooltip="判定良性洗盘或底部吸筹的基准线", group="13. 长周期筹码与主力意图雷达")
-chipNeutral = input.float(2.0, "中枢缠绕阈值 (%)", tooltip="贴近均线的无趋势震荡区", group="13. 长周期筹码与主力意图雷达")
+extremeMult = input.float(2.0, "极限偏离倍数 (StdDev)", tooltip="2倍标准差包含95%的波动。超出即判定为情绪泡沫或极限错杀", group="13. 长周期筹码与主力意图雷达")
+thresholdMult = input.float(1.0, "常规偏离倍数 (StdDev)", tooltip="1倍标准差包含68%的波动。判定是否真正脱离均线震荡区", group="13. 长周期筹码与主力意图雷达")
+neutralMult = input.float(0.4, "中枢缠绕倍数 (StdDev)", tooltip="建议0.3~0.5倍标准差。完全动态自适应中枢摩擦区。", group="13. 长周期筹码与主力意图雷达")
+
+// 🧩 5D 雷达的高级微调参数开放
+grp5d = "14. 5D雷达高级微调 (硬编码参数开放)"
+diffThreshold  = input.float(30.0, "背离差值警戒线 (VW-MFI)", group=grp5d)
+vwHighLvl      = input.int(70, "VW 超买绝对阈值", group=grp5d)
+vwLowLvl       = input.int(30, "VW 超卖绝对阈值", group=grp5d)
+mfiBullSyncLvl = input.int(65, "MFI 多头及格阈值", group=grp5d)
+mfiBearSyncLvl = input.int(35, "MFI 空头及格阈值", group=grp5d)
+squeezeMinBars = input.int(5, "均线密集需连续确认的K线数", group=grp5d)
+atrSqueezeMax  = input.int(40, "均线密集期允许的最大ATR均值", group=grp5d)
 
 // ==================== 核心颜色定义 ====================
 bearColor = color.red
@@ -131,6 +141,17 @@ maRatio = (maDist / math.max(close, 1e-10)) * 100
 chipGravityLine = math.sum(vwSafeVol * hlc3, chipLen) / math.max(math.sum(vwSafeVol, chipLen), 1e-10)
 chipDistRatio = (close - chipGravityLine) / chipGravityLine * 100
 
+// 🧬 动态自适应标准差计算
+chipStdDev = ta.stdev(chipDistRatio, chipLen)
+safeChipStdDev = math.max(nz(chipStdDev, 1.0), 1.0) 
+
+// 生成 100% 动态的 宏观三道防线
+chipThreshold = safeChipStdDev * thresholdMult
+chipExtreme = safeChipStdDev * extremeMult
+// 🌟 终极自适应：中枢阈值动态化，下限用个股自身的日均真实波幅 (ATR) 的 10% 来兜底
+atrBasePct = (atr / close) * 100  // 计算当前品种的真实波幅百分比
+chipNeutral = math.max(safeChipStdDev * neutralMult, atrBasePct * 0.1)
+
 // ✨ 提取 ATR 波动率特征 (修复丢失的二维矩阵)
 string volMod = atrPercent >= 80 ? " (剧烈)" : atrPercent <= 20 ? " (极静)" : " (稳健)"
 
@@ -148,17 +169,17 @@ else if chipDistRatio > chipThreshold
     actionSignal := " (多)"
     chipStatusColor := color.rgb(0, 255, 128)      // 亮绿
 else if chipDistRatio > chipNeutral
-    baseChipStatus := "高位派发" // 逻辑依据：价格滞涨，导致下方均线加速上移。主力利用高位震荡掩护出货。
-    actionSignal := " (空)"
+    baseChipStatus := "中枢偏强" // 逻辑依据：处于1倍标准差上半区，属于强势震荡蓄势阶段。
+    actionSignal := " (等/多)"
     chipStatusColor := color.rgb(255, 152, 0)      // 橙色
 else if chipDistRatio >= -chipNeutral
     baseChipStatus := "中枢震荡" // 逻辑依据：价格死死贴着均线摩擦，多空终极决战。无趋势的垃圾交易时间。
     actionSignal := " (等)"
     chipStatusColor := color.rgb(255, 255, 255)    // 白色
 else if chipDistRatio > -chipThreshold
-    baseChipStatus := "破位套牢" // 逻辑依据：刚刚跌穿生命线。套牢盘噩梦开始，抛压沉重，绝不接飞刀。
-    actionSignal := " (等)"
-    chipStatusColor := color.rgb(180, 0, 255)      // 危险紫
+    baseChipStatus := "中枢偏弱" // 逻辑依据：处于1倍标准差下半区。属于弱势震荡回踩阶段，但尚未引起宏观恐慌破位。
+    actionSignal := " (等/空)"
+    chipStatusColor := color.rgb(153, 204, 255)    // 淡蓝色 (表示偏冷，但未到紫色的极度危险区)
 else if chipDistRatio >= -chipExtreme
     baseChipStatus := "底部吸筹" // 逻辑依据：进入高性价比击球区。恐慌盘宣泄完毕，主力悄悄利用背离建仓。
     actionSignal := " (多)"
@@ -479,7 +500,7 @@ else if atrPanelPosStr == "右下角"
 else if atrPanelPosStr == "左下角"
     panelPos := position.bottom_left
 
-var table atrTable = table.new(panelPos, 3, 4, bgcolor=color.new(color.black, 40), border_width=1, border_color=color.new(color.gray, 60))
+var table atrTable = table.new(panelPos, 3, 5, bgcolor=color.new(color.black, 40), border_width=1, border_color=color.new(color.gray, 60))
 
 if showAtrPanel and barstate.islast
     atrStopDist = atr * atrMult
@@ -513,6 +534,198 @@ if showAtrPanel and barstate.islast
     table.cell(atrTable, 0, 3, "200日筹码", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 3, chipPriceStr, text_color=color.rgb(255, 152, 0), text_size=size.small, text_halign=text.align_center)
     table.cell(atrTable, 2, 3, chipCombinedStr, text_color=chipStatusColor, text_size=size.small, text_halign=text.align_right)
+
+// ==========================================
+// ✨ 新增：5D 综合意图雷达 (空间+资金+波动+均线共识)
+// ==========================================
+string matrixStatus = ""
+color matrixColor   = na
+string matrixAction = ""
+int backtestSignal  = 0  // 🌟 新增：多空等降维信号变量 (1=多, -1=空, 0=等)
+
+// 1. 基础安全取值
+float safeVw  = nz(vwVar3, 50)
+float safeMfi = nz(mfiVal, 50)
+float safeAtr = nz(atrPercent, 50) 
+
+// 2. 阈值与特征定义 (🌟 告别硬编码，接入动态参数)
+bool isVwHigh      = safeVw >= vwHighLvl
+bool isVwLow       = safeVw <= vwLowLvl
+bool isAtrHigh     = safeAtr >= 80    
+bool isAtrLow      = safeAtr <= 20    
+
+bool isTopDiverge  = isVwHigh and (safeVw - safeMfi) > diffThreshold 
+bool isBotDiverge  = isVwLow  and (safeMfi - safeVw) > diffThreshold 
+bool isBullSync    = isVwHigh and safeMfi >= mfiBullSyncLvl 
+bool isBearSync    = isVwLow  and safeMfi <= mfiBearSyncLvl 
+
+// 3. GMMA 降维特征植入
+bool isGmmaBullish = gmmaNetScore >= 30  
+bool isGmmaBearish = gmmaNetScore <= -30 
+
+// 🧬 神级升级 2：Squeeze 时间锁 (🌟 告别硬编码，接入动态参数)
+float histAtrAvg = ta.sma(safeAtr, 20) 
+int squeezeDuration = nz(ta.barssince(not isLongContracted), 0)
+
+// 真正的横盘密集 = 均线粘合 + 这种粘合已经连续维持了足够久 + 过去波动率极低
+bool isGmmaSqueeze = isLongContracted and (squeezeDuration >= squeezeMinBars) and (histAtrAvg <= atrSqueezeMax)
+
+// ==================== 5D 状态机路由 ====================
+if chipDistRatio > chipThreshold
+    if isTopDiverge
+        matrixStatus := "高位无量诱多"
+        matrixColor  := color.rgb(255, 60, 200) 
+        matrixAction := "顶背离逃命 🚨"
+        backtestSignal := -1
+    else if isBullSync
+        if isAtrLow 
+            matrixStatus := "高位锁仓推升"
+            matrixColor  := color.rgb(255, 100, 100)
+            matrixAction := "防守型持有"
+            backtestSignal := 1
+        else if isAtrHigh 
+            matrixStatus := "高位宽幅派发"
+            matrixColor  := color.rgb(255, 0, 0)
+            matrixAction := "随时雪崩 ⚠️"
+            backtestSignal := -1
+        else
+            matrixStatus := "高位极度狂热"
+            matrixColor  := color.rgb(255, 0, 0)
+            matrixAction := "随时崩盘 ⚠️"
+            backtestSignal := -1
+    else if isBotDiverge
+        matrixStatus := "下跌中继反抽"
+        matrixColor  := color.rgb(255, 152, 0)
+        matrixAction := "勿接飞刀 🚫"
+        backtestSignal := -1
+    else if isBearSync
+        if isGmmaBearish
+            matrixStatus := "主跌浪彻底确立"
+            matrixColor  := color.rgb(255, 255, 255)
+            matrixAction := "坚决空仓"
+            backtestSignal := -1
+        else
+            matrixStatus := "高位破位杀跌"
+            matrixColor  := color.rgb(255, 82, 82)
+            matrixAction := "破位止损"
+            backtestSignal := -1
+    else if isVwHigh
+        matrixStatus := "高位滞涨预警"
+        matrixColor  := color.rgb(255, 100, 100) 
+        matrixAction := "逐步减仓"
+        backtestSignal := 0
+    else
+        if isGmmaBearish
+            matrixStatus := "均线压制阴跌"
+            matrixColor  := color.rgb(255, 255, 255)
+            matrixAction := "反抽清仓"
+            backtestSignal := 0
+        else
+            matrixStatus := "高位震荡博弈"
+            matrixColor  := color.rgb(255, 255, 255) 
+            matrixAction := "谨慎持仓"
+            backtestSignal := 0
+
+else if chipDistRatio < -chipThreshold
+    if isBotDiverge
+        if isAtrHigh 
+            matrixStatus := "底部暴力洗盘"
+            matrixColor  := color.rgb(255, 235, 59)
+            matrixAction := "起爆在即 🚀"
+            backtestSignal := 1
+        else         
+            matrixStatus := "底部暗中建仓"
+            matrixColor  := color.rgb(255, 235, 59)
+            matrixAction := "主力吸筹潜伏 💰"
+            backtestSignal := 1
+    else if isBearSync
+        if isAtrHigh 
+            matrixStatus := "恐慌性连环踩踏"
+            matrixColor  := color.rgb(180, 0, 255) 
+            matrixAction := "严禁接刀 🚫"
+            backtestSignal := -1
+        else
+            matrixStatus := "宏观极限冰点"
+            matrixColor  := color.rgb(67, 255, 130)
+            matrixAction := "左侧分批摸底"
+            backtestSignal := 0
+    else if isTopDiverge
+        matrixStatus := "底部缩量假涨"
+        matrixColor  := color.rgb(180, 0, 255)
+        matrixAction := "防二次探底"
+        backtestSignal := -1
+    else if isBullSync
+        if isGmmaBearish
+            matrixStatus := "严重超跌反抽"
+            matrixColor  := color.rgb(204, 237, 255)
+            matrixAction := "快进快出 / 观望"
+            backtestSignal := 0
+        else
+            matrixStatus := "底部共振起爆"
+            matrixColor  := color.rgb(0, 255, 0)
+            matrixAction := "右侧重仓追入 🚀"
+            backtestSignal := 1
+    else if isVwLow
+        matrixStatus := "底部弱势震荡"
+        matrixColor  := color.rgb(155, 240, 255) 
+        matrixAction := "耐心等待"
+        backtestSignal := 0
+    else
+        matrixStatus := "底部筑底蓄势"
+        matrixColor  := color.rgb(200, 255, 138) 
+        matrixAction := "择机分批建仓"
+        backtestSignal := 0
+
+else 
+    if isTopDiverge
+        matrixStatus := "箱体上沿诱多"
+        matrixColor  := color.rgb(255, 82, 82)
+        matrixAction := "逢高减磅"
+        backtestSignal := -1
+    else if isBotDiverge
+        matrixStatus := "箱体下沿吸筹"
+        matrixColor  := color.rgb(76, 175, 80)
+        matrixAction := "逢低吸纳"
+        backtestSignal := 1
+    else if isBullSync
+        if isGmmaSqueeze and isAtrHigh
+            matrixStatus := "均线开花突破"
+            matrixColor  := color.rgb(0, 255, 255)
+            matrixAction := "变盘满仓干 🚀"
+            backtestSignal := 1
+        else
+            matrixStatus := "强势向上突破"
+            matrixColor  := color.rgb(0, 255, 128)
+            matrixAction := "右侧跟随做多"
+            backtestSignal := 1
+    else if isBearSync
+        if isGmmaSqueeze and isAtrHigh
+            matrixStatus := "密集区断头铡"
+            matrixColor  := color.rgb(255, 0, 0)
+            matrixAction := "长线破位逃命 🚨"
+            backtestSignal := -1
+        else if isAtrHigh 
+            matrixStatus := "断头铡刀破位"
+            matrixColor  := color.rgb(255, 0, 0)
+            matrixAction := "无条件逃命"
+            backtestSignal := -1
+        else
+            matrixStatus := "弱势向下破位"
+            matrixColor  := color.rgb(255, 152, 0)
+            matrixAction := "破位止损"
+            backtestSignal := -1
+    else
+        matrixStatus := "中枢缠绕"
+        matrixColor  := color.new(color.white, 0) 
+        matrixAction := "观望 / 顺势"
+        backtestSignal := 0
+
+// ==================== 渲染第 5 行 (这里必须空4格) ====================
+if showAtrPanel and barstate.islast
+    table.cell(atrTable, 0, 4, "5D 多维意图", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+    table.cell(atrTable, 1, 4, matrixStatus, text_color=matrixColor, text_size=size.small, text_halign=text.align_center)
+    table.cell(atrTable, 2, 4, matrixAction, text_color=matrixColor, text_size=size.small, text_halign=text.align_right)
+
 // ==================== [ 后台 Data Window 输出 ] ====================
 backtest_atrStopDist = atr * atrMult
 backtest_priceMinusAtr = close - atr
@@ -530,6 +743,10 @@ plot(showAtrPanel ? maRatio : na, title="【看板】价距均线百分比(%)", 
 
 plot(showAtrPanel ? chipGravityLine : na, title="【后台数据】200日筹码重心价", color=color.rgb(255, 152, 0), display=display.data_window)
 plot(showAtrPanel ? chipDistRatio : na, title="【后台数据】当前价距筹码重心(%)", color=chipStatusColor, display=display.data_window)
+
+// ==================== [ 🌟 新增：回测背景光带渲染 ] ====================
+bgcolor(backtestSignal == 1 ? color.new(#00BFFF, 85) : na, title="【回测】做多/持仓区间 (浅蓝)")
+bgcolor(backtestSignal == -1 ? color.new(#9C27B0, 85) : na, title="【回测】看空/规避区间 (紫色)")
 
 // ==================== [ 第六阶段：最终报警推送 ] ====================
 alertcondition(climaxCloudBull, "【终极大招】量价自适应双重云图共振底", "动能与主力资金流同时跌破动态分位数生命线，超级冰点左侧绝佳机会！")
