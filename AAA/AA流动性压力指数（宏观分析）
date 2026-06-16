@@ -1,13 +1,14 @@
 //@version=6
-indicator("流动性压力指数", shorttitle="流动性压力55版", overlay=false)
+indicator("流动性压力指数", shorttitle="流动性压力56版", overlay=false)
 
-// === 1. 参数 & 阈值（完全保留原逻辑）===
+// === 1. 参数 & 阈值 ===
 group_lsi = "LSI (美元体系内部压力)"
 src_sofr = input.string("FRED:SOFR", "SOFR 数据源", group=group_lsi)
 src_rrp = input.string("FRED:RRPONTSYAWARD", "RRP 利率数据源", group=group_lsi)
 src_effr = input.string("FRED:EFFR", "有效聯邦基金利率來源", options=["FRED:EFFR", "FRED:DFF"], group=group_lsi)
 src_iorb = input.string("FRED:IORB", "IORB 数据源", group=group_lsi)
 src_us02y = input.string("TVC:US02Y", "2年期美債收益率來源", options=["TVC:US02Y", "FRED:DGS2"], group=group_lsi)
+src_us10y = input.string("TVC:US10Y", "10年期美债收益率来源", options=["TVC:US10Y", "FRED:DGS10"], group=group_lsi)
 src_t10yie = input.string("FRED:T10YIE", "T10YIE 数据源", group=group_lsi)
 src_dfii10 = input.string("FRED:DFII10", "DFII10 真实长期收益率", group=group_lsi)
 src_credit_spread = input.string("FRED:BAMLH0A0HYM2", "信用利差数据源", group=group_lsi)
@@ -17,6 +18,13 @@ threshold_extreme_tight = input.float(50.0, "LSI 极端紧张 (bps)", group=grou
 threshold_extreme_loose = input.float(-30.0, "LSI 极端宽松 (bps)", group=group_lsi)
 th_t10yie = input.float(2.5, "10Y通胀预期红色阈值 (%)", group=group_lsi)
 th_inf_yoy = input.float(3.0, "通胀YoY红色阈值 (%)", group=group_lsi)
+
+/// [优化] 斜率动量参数 (真正危机捕获版)
+group_curve = "收益率曲线斜率报警 (危机捕获版)"
+curve_lookback = input.int(10, "斜率变动计算周期(天)", group=group_curve)
+us02y_drop_th = input.float(20.0, "牛陡:2年期暴跌阈值(BP)", group=group_curve, tooltip="2年期在周期内暴跌超过此值(如-20BP)，代表市场恐慌定价降息，衰退前兆")
+us10y_spike_th = input.float(20.0, "熊陡:10年期暴涨阈值(BP)", group=group_curve, tooltip="10年期在周期内暴涨超过此值(如+20BP)，代表长端流动性崩盘或通胀失控")
+spread_change_th = input.float(10.0, "利差走阔最低阈值(BP)", group=group_curve, tooltip="要求10Y-2Y利差在周期内实打实地拉开")
 
 group_enh_new = "强美元与动量附加设置"
 use_dxy = input.bool(true, "启用 DXY 强美元惩罚(黑洞状态)", group=group_enh_new)
@@ -30,13 +38,13 @@ credit_roc_th = input.float(10.0, "信用利差急升预警阈值(%)", group=gro
 group_adv = "高级报警设置"
 gold_th = input.float(-350.0, "黄金到顶判定阈值 (有效利率EFFR-CPI)", group=group_adv)
 credit_th = input.float(400.0, "危机判定信用利差阈值 (bps)", group=group_adv)
-reserve_gdp_threshold = input.float(11e-11, "准备金/GDP 不足阈值（BUG邪修，当0.11的算）", group=group_adv)
+reserve_gdp_threshold = input.float(11e-11, "准备金/GDP 不足阈值", group=group_adv)
 reserve_assets_threshold = input.float(0.11, "准备金/银行总资产 不足阈值", minval=0.0, maxval=1.0, step=0.01, group=group_adv)
 ma_period = input.int(10, "美联储黄金到顶 MA 周期", minval=1, group=group_adv)
 
 group_alert_enh = "增强报警 - 实际利率 & 通胀偏差 & 滞胀"
 th_real_tight = input.float(2.2, "实际利率 显著紧缩阈值 (%)", group=group_alert_enh)
-th_real_ext_loose = input.float(0.0, "实际利率 极度宽松阈值（注意黄金负0.5%到顶）", group=group_alert_enh)
+th_real_ext_loose = input.float(0.0, "实际利率 极度宽松阈值", group=group_alert_enh)
 th_breakeven_dev = input.float(0.9, "⚠通胀预期 vs 现实偏差（绝对值）", group=group_alert_enh)
 th_stagflation_real = input.float(1.8, "⚠滞胀+信用压力双杀 实际利率", group=group_alert_enh)
 th_stagflation_credit = input.float(4.0, "⚠滞胀+信用压力双杀 信用利差", group=group_alert_enh)
@@ -51,8 +59,8 @@ s5th_bottom_th   = input.float(15.5, "S5TH 底部阈值（≤ 此值提示市场
 
 group_gsr = "金银比报警 (Gold/Silver Ratio)"
 use_gsr_alert = input.bool(true, "启用金银比报警", group=group_gsr)
-gsr_low_threshold  = input.float(50.0, "金银比偏低阈值（<=此值报警）", group=group_gsr)
-gsr_high_threshold = input.float(80.0, "金银比偏高阈值（>=此值报警）", group=group_gsr)
+gsr_low_threshold  = input.float(50.0, "金银比偏低阈值", group=group_gsr)
+gsr_high_threshold = input.float(80.0, "金银比偏高阈值", group=group_gsr)
 
 group_gli = "全球流动性总量 (背景报警设置)"
 gli_bg_active = input.bool(true, "启用全球总量背景报警", group=group_gli)
@@ -68,15 +76,13 @@ gli_low_pct = input.float(25, "总量：低位收缩触发点", group=group_gli)
 gli_mom_lookback = input.int(20, "增长率检测周期 (天)", group=group_gli)
 gli_mom_threshold = input.float(-1.0, "周环比骤减报警阈值 (%)", group=group_gli)
 
-// --- 【UI与看板字体设置】 ---
 group_ui = "UI与看板设置"
 table_size_str = input.string("Small", title="看板字体大小", options=["Tiny", "Small", "Normal", "Large", "Huge"], group=group_ui)
 table_size = table_size_str == "Tiny" ? size.tiny : table_size_str == "Small" ? size.small : table_size_str == "Normal" ? size.normal : table_size_str == "Large" ? size.large : size.huge
 
-// === 【V55 新增模块：资金流向雷达防脱敏与去噪】 ===
 group_flow = "V55 资金流向雷达设置"
-flow_lookback = input.int(10, "流向计算周期 (天)", group=group_flow, tooltip="延长计算周期(如10天)，防止周更数据(如TGA)在单次大幅抽水后，因5天内未更新导致差值归零、雷达误判。")
-flow_threshold = input.float(5.0, "有效动作过滤阈值 (Billion)", group=group_flow, tooltip="低于此数值的绝对变动将被视为白噪音，直接忽略。彻底解决微小逆回购波动被误判为最大抽水方的问题。")
+flow_lookback = input.int(10, "流向计算周期 (天)", group=group_flow)
+flow_threshold = input.float(5.0, "有效动作过滤阈值 (Billion)", group=group_flow)
 
 // === 2. 最高稳定性统一请求函数 ===
 safe_daily(src) =>
@@ -119,14 +125,11 @@ gold_price   = safe_daily("TVC:GOLD")
 silver_price = safe_daily("TVC:SILVER")
 
 wdtgal   = safe_daily("FRED:WDTGAL")
-wrbwfrbl = safe_daily("FRED:WRBWFRBL")
+wrbwfrbl = wr_bal_raw_display
 dxy_raw = safe_daily(src_dxy)
 
-// --- 【资金流向核心模块 (V55 跨周期升级与去噪)】 ---
 wlrr = safe_daily("FRED:WLRRAL") 
 
-// 换算逻辑：所有 FRED 原始金额数据统一除以 1,000,000,000 得到 Billions (B)
-// V55修正：引入 flow_lookback 解决周更数据闪退陷阱
 delta_tga_b  = (wdtgal - nz(wdtgal[flow_lookback])) / 1000000000 
 delta_wlrr_b = (wlrr - nz(wlrr[flow_lookback])) / 1000000000
 delta_rrp_b  = (rrp_bal - nz(rrp_bal[flow_lookback])) / 1000000000
@@ -137,16 +140,13 @@ min_inject = math.min(delta_tga_b, math.min(delta_wlrr_b, delta_rrp_b))
 string drain_name = max_drain == delta_tga_b ? "TGA" : max_drain == delta_wlrr_b ? "外国逆回购" : "国内逆回购"
 string inject_name = min_inject == delta_tga_b ? "TGA" : min_inject == delta_wlrr_b ? "外国逆回购" : "国内逆回购"
 
-// V55修正：引入 flow_threshold，低于 5.0B 的白噪音(如微小逆回购)直接屏蔽，不再报假警
 string drain_str = max_drain > flow_threshold ? drain_name + "抽水(-" + str.tostring(max_drain, "#.##") + "B)" : "无明显抽水"
 string inject_str = min_inject < -flow_threshold ? inject_name + "放水(+" + str.tostring(math.abs(min_inject), "#.##") + "B)" : "无明显放水"
 string fed_flow_str = drain_str + " | " + inject_str
 
-// 核心破坏性抽水判定
 bool is_core_draining = max_drain > flow_threshold and (max_drain == delta_tga_b or max_drain == delta_wlrr_b)
-// -------------------------------------------
 
-// === 5. 核心计算（逻辑完全不变）===
+// === 5. 核心计算 ===
 total_liq = (fed_bal - tga_bal - rrp_bal + (ecb_bal_raw * eur_usd) + (pbc_bal_raw * cny_usd) + (boj_bal_raw * jpy_usd)) / 1000000000000
 prev_liq = nz(total_liq[gli_mom_lookback], total_liq)
 denom = math.max(math.abs(prev_liq), 0.01)
@@ -169,10 +169,51 @@ rrp_rate = nz(req_safe(src_rrp) * 100)
 effr = nz(req_safe(src_effr) * 100)
 iorb = nz(req_safe(src_iorb) * 100)
 us02y = nz(req_safe(src_us02y) * 100)
+us10y = nz(req_safe(src_us10y) * 100) 
 t10yie = nz(req_safe(src_t10yie) * 100)
 dfii10 = nz(req_safe(src_dfii10) * 100)
 credit_spread = nz(req_safe(src_credit_spread) * 100)
 us_inflation_rate = nz(req_safe(src_usiryy) * 100)
+
+// --- [优化模块] 收益率曲线斜率 (牛陡/熊陡) 监控 (危机捕获版) ---
+yield_spread = us10y - us02y
+
+// 1. 使用 3 日均线平滑底层数据，过滤单日异常脉冲
+smooth_us10y = ta.sma(us10y, 3)
+smooth_us02y = ta.sma(us02y, 3)
+smooth_spread = ta.sma(yield_spread, 3)
+
+// 2. 计算周期内的宏观变动幅度
+us10y_change = smooth_us10y - nz(smooth_us10y[curve_lookback], smooth_us10y)
+us02y_change = smooth_us02y - nz(smooth_us02y[curve_lookback], smooth_us02y)
+spread_change = smooth_spread - nz(smooth_spread[curve_lookback], smooth_spread)
+
+bool curve_data_valid = not na(smooth_us10y[curve_lookback]) and not na(smooth_us02y[curve_lookback])
+
+// 牛陡 (衰退警报)：利差走阔 + 2年期极其暴力的下跌 (数学上自然保证短端跌幅大)
+is_bull_steepener = curve_data_valid and (spread_change > spread_change_th) and (us02y_change <= -us02y_drop_th)
+
+// 熊陡 (杀估值警报)：利差走阔 + 10年期极其暴力的上涨 (数学上自然保证长端涨幅大)
+is_bear_steepener = curve_data_valid and (spread_change > spread_change_th) and (us10y_change >= us10y_spike_th)
+var string curve_status_text = "平稳"
+var color curve_status_color = color.gray
+
+if is_bull_steepener
+    curve_status_text := "牛陡(衰退前兆)"
+    curve_status_color := color.red
+else if is_bear_steepener
+    curve_status_text := "熊陡(杀估值)"
+    curve_status_color := color.orange
+else if yield_spread < -50
+    curve_status_text := "深度倒挂"
+    curve_status_color := color.yellow
+else if yield_spread < 0
+    curve_status_text := "浅度倒挂"
+    curve_status_color := color.gray
+else
+    curve_status_text := "平稳正斜率"
+    curve_status_color := color.green
+// -------------------------------------------------------------------------
 
 credit_spread_roc = ta.roc(credit_spread, credit_roc_len)
 is_credit_spiking = use_credit_roc and (credit_spread_roc > credit_roc_th)
@@ -253,7 +294,12 @@ plot(credit_spread, "信用利差", color=color.rgb(226, 105, 36), linewidth=1)
 plot(us_inflation_rate, "通胀 YoY", color=#00FFFF, linewidth=1)
 hline(0, "零线", color=color.gray, linestyle=hline.style_dashed)
 
-// === 9. 完整背景颜色详细注释恢复 ===
+// === 9. 完整背景颜色详细注释恢复与回测增强 ===
+
+// [新增/修改] 斜率动量高光，高优先级显示，用于回测确认左侧信号
+bgcolor(is_bull_steepener ? color.new(#ff0000, 75) : na, title="⚠️【动量预警】牛陡：衰退/流动性枯竭前兆 (短端暴跌)")
+bgcolor(is_bear_steepener ? color.new(#ff8c00, 75) : na, title="⚠️【动量预警】熊陡：长端通胀/结构杀估值 (长端暴拉)")
+
 bgcolor(state_blackhole   ? color.new(#880e4f, 40) : na, title="⭐【宏观状态】流动性黑洞→ 核心流动性断裂（LSI极紧+RRP枯竭）叠加 风险资产抛售（信用利差>400bps）与 全球抽水（DXY强美元）。")
 bgcolor(state_stagflation ? color.new(#1f56ce, 35) : na, title="⭐【宏观状态】滞胀式危机→滞胀+信用双杀（实际利率 >1.8% 且信用利差 >4.0%）同时 通胀预期过高（>2.5%）")
 bgcolor(is_credit_spiking ? color.new(color.fuchsia, 70) : na, title="⚠️【动量预警】信用利差短期急剧恶化")
@@ -293,7 +339,7 @@ f_auto_wrap(txt, max_chars) =>
             result += str.substring(txt, start_pos, end_pos) + (end_pos < str_len ? "\n" : "")
     result
 
-var table us_table = table.new(position.top_right, 8, 5,  bgcolor=color.new(color.black, 15), border_width=1, border_color=color.new(#5f6368, 50))
+var table us_table = table.new(position.top_right, 8, 6,  bgcolor=color.new(color.black, 15), border_width=1, border_color=color.new(#5f6368, 50))
 
 if barstate.islast or barstate.isrealtime
     string bg_desc = ""
@@ -354,11 +400,14 @@ if barstate.islast or barstate.isrealtime
         bg_desc += " | 🔥经济过热"
     if not na(s5th_raw) and s5th_raw <= s5th_bottom_th
         bg_desc += " | 🟢市场底部"
+    if is_bull_steepener
+        bg_desc += " | ⚠曲线牛陡(衰退前兆)"
+    if is_bear_steepener
+        bg_desc += " | ⚠曲线熊陡(杀估值)"
 
-    string macro_state_text = state_blackhole ? "⭐【宏观状态】流动性黑洞" : state_stagflation ? "⭐【宏观状态】滞胀式危机" : state_supernova ? "⭐【宏观状态】流动性泛滥" : state_gold_regime ? "⭐【宏观状态】范式转换" : "⭐【宏观状态】风平浪静"
+    string macro_state_text = state_blackhole ? "⭐【宏观状态】流动性黑洞" : state_stagflation ? "⭐【宏观状态】滞胀式危机" : is_bull_steepener ? "🚨【宏观状态】衰退前兆(极速牛陡)" : is_bear_steepener ? "🚨【宏观状态】长端崩盘(极速熊陡)" : state_supernova ? "⭐【宏观状态】流动性泛滥" : state_gold_regime ? "⭐【宏观状态】范式转换" : "⭐【宏观状态】风平浪静"
     string final_text = f_auto_wrap(macro_state_text + "  ➔  " + bg_desc, 65)
     
-    // --- AI 多维研判逻辑注入 (融入资金流向分析) ---
     real_rate_val = dfii10 / 100
     credit_val = credit_spread / 100
     us02y_val = us02y / 100
@@ -366,23 +415,21 @@ if barstate.islast or barstate.isrealtime
     t10yie_val = t10yie / 100
     inf_yoy_val = us_inflation_rate / 100
     string credit_roc_str = is_credit_spiking ? " (🔥急升)" : ""
-    bool urgent_alert = is_liquidity_break or crisis_signal or is_rrp_exhausted or is_sudden_drain or is_gold_top or is_impulse_waning or is_gli_tight or is_reserve_insufficient or (fed_liq_top and is_breakeven_dev_large and (is_gli_loose or is_normal_loose or is_extreme_loose)) or is_s5th_weak_condition or is_s5th_severe or (is_dxy_strong and use_dxy) or is_credit_spiking
+    
+    bool urgent_alert = is_liquidity_break or crisis_signal or is_rrp_exhausted or is_sudden_drain or is_gold_top or is_impulse_waning or is_gli_tight or is_reserve_insufficient or (fed_liq_top and is_breakeven_dev_large and (is_gli_loose or is_normal_loose or is_extreme_loose)) or is_s5th_weak_condition or is_s5th_severe or (is_dxy_strong and use_dxy) or is_credit_spiking or is_bull_steepener or is_bear_steepener
 
     string ai_level_1_raw = "【一阶宏观周期与债务周期】" + (state_blackhole ? "当前处于短期债务周期的严重去杠杆阶段，流动性黑洞吞噬一切风险溢价，系统违背安全边际法则，建议转向现金与极短期美债防御。" : state_stagflation ? "进入滞胀式去杠杆期，通胀顽固高企与实体信用恶化共振，股债双杀风险极大，逢低关注具备抗通胀属性的硬资产（如黄金）与高股息类债核心资产。" : state_supernova ? "处于宏观流动性矩阵（MLM）的绝对扩张象限，充裕资金驱动资产价格重估，顺周期、大盘价值以及具备宽阔护城河的优质标的将显著跑赢。" : state_gold_regime ? "世界秩序与货币体系进入范式转换期，实际利率承压且法币信用长期弱化，贵金属处于主升浪，重点配置黄金及低估值高安全边际的跨市场资产作为对冲。" : "宏观底座与债务周期平稳，无系统性危机信号，投资主线应回归内在价值和 CAPE 估值中枢，由企业盈利驱动。")
     
-    // 注入资金流向分析至二阶研判 (V55适配 flow_threshold 去噪)
     string flow_analysis = "\n🔍【资金动态】" + (max_drain > flow_threshold ? "监测到" + drain_name + "正在密集抽水(-$" + str.tostring(max_drain, "#.##") + "B)，该行为属于" + (drain_name == "国内逆回购" ? "系统内部存量腾挪。" : "外部清算导致的流动性失血。") : "近期系统性抽水动能微弱，") + (min_inject < -flow_threshold ? "目前" + inject_name + "正在通过放水(+$" + str.tostring(math.abs(min_inject), "#.##") + "B)部分对冲市场压力。" : "且市场缺乏显著的外部放水对冲，需警惕流动性真空风险。")
     
     string ai_level_2_raw = "【二阶流动性矩阵与底层水位】" + (is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂，隔夜逆回购(RRP)彻底耗尽，准备金失去关键缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠️总量收缩：全球主要央行处于实质性去杠杆周期，GLI总量萎缩，资金面抽水将严重压制核心权益市场的估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性处于中性平衡带，央行扩表与紧缩力量相互博弈，资本市场由结构性摩擦和存量资金博弈主导。") + (is_sudden_drain ? " (⚠️异常警报：监测到全球总资金池周环比雪崩骤降，警惕极速闪崩！)" : "") + flow_analysis
-    
-    string ai_level_3_raw = "【三阶微观定价与风险溢价】" + (crisis_signal ? "🔥美债长短端剧烈倒挂叠加信用利差爆表，危机传导链条已打通，风险资产正在被重新定价，切勿逆势接飞刀！" : is_s5th_severe ? "🩸广度指标(S5TH)严重崩塌，绝对空头主导，系统性下杀风险极大，坚决规避缺乏现金流的高估值科技与高波动权益。" : is_s5th_weak_condition ? "📉股指内部动能明显弱化，长短期均线呈现空头排列，建议锁定前期盈利，将仓位向低估值、高派息等具备极强安全边际的标的转移。" : is_credit_spiking ? "⚠️信用利差动量（ROC）短期急速飙升，企业融资环境剧烈恶化，警惕高收益垃圾债违约风险及流动性危机的跨市场传染。" : is_reserve_insufficient ? "⚠️银行系统准备金占GDP及总资产比重双双跌破安全红线，回购市场极度脆弱，随时爆发钱荒冲击波。" : "📈微观交易结构与风险偏好维持稳健，未见极端抛售及恐慌挤兑迹象，维持合理仓位并耐心持有深度价值标的。")
-    
+ 
+    string ai_level_3_raw = "【三阶微观定价与风险溢价】" + (is_bull_steepener ? "🚨【牛陡/衰退预警】短端美债遭遇恐慌性抢筹暴跌，市场正极速定价美联储紧急降息与经济衰退。流动性枯竭前夜，立即转向现金与极短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端美债收益率失控暴涨，期限溢价爆表。长久期资产(如高估值AI/科技股)的折现率地基崩塌，面临惨烈杀估值！" : crisis_signal ? "🔥美债长短端剧烈倒挂叠加信用利差爆表，危机传导链条已打通，风险资产正在被重新定价，切勿逆势接飞刀！" : is_s5th_severe ? "🩸广度指标(S5TH)严重崩塌，绝对空头主导，系统性下杀风险极大，坚决规避缺乏现金流的高估值科技与高波动权益。" : is_s5th_weak_condition ? "📉股指内部动能明显弱化，长短期均线呈现空头排列，建议锁定前期盈利，将仓位向低估值、高派息等具备极强安全边际的标的转移。" : is_credit_spiking ? "⚠️信用利差动量（ROC）短期急速飙升，企业融资环境剧烈恶化，警惕高收益垃圾债违约风险及流动性危机的跨市场传染。" : is_reserve_insufficient ? "⚠️银行系统准备金占GDP及总资产比重双双跌破安全红线，回购市场极度脆弱，随时爆发钱荒冲击波。" : "📈微观交易结构与风险偏好维持稳健，未见极端抛售及恐慌挤兑迹象，维持合理仓位并耐心持有深度价值标的。")    
     string ai_level_1 = f_auto_wrap(ai_level_1_raw, 50)
     string ai_level_2 = f_auto_wrap(ai_level_2_raw, 50)
     string ai_level_3 = f_auto_wrap(ai_level_3_raw, 50)
     string ai_judgment = "🤖【AI 多维系统实时核心研判】\n" + ai_level_1 + "\n" + ai_level_2 + "\n" + ai_level_3
 
-    // --- 渲染表格 (字体已绑定设置项) ---
     table.cell(us_table, 0, 0, "LSI 压力", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
     table.cell(us_table, 1, 0, str.tostring(lsi, "#.##") + " BP", text_color=lsi > threshold_extreme_tight ? color.maroon : lsi >= threshold_tight ? color.red : lsi < 0 ? color.green : #ffffff, text_size=table_size)
     table.cell(us_table, 2, 0, "GLI / 储备", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
@@ -405,13 +452,21 @@ if barstate.islast or barstate.isrealtime
     table.cell(us_table, 1, 2, str.tostring(liq_impulse, "#.##") + "%" + (is_impulse_waning ? " ⚠" : ""), text_color = liq_impulse > 0 ? color.lime : color.orange, text_size = table_size)
     table.cell(us_table, 2, 2, "S5TH 广度", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
     table.cell(us_table, 3, 2, str.tostring(s5th_raw, "#.#") + "%", text_color = is_s5th_severe ? color.red : is_s5th_weak_condition ? color.orange : color.white, text_size=table_size)
-    
     table.cell(us_table, 4, 2, "资金去向(周)", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
     table.merge_cells(us_table, 5, 2, 7, 2)
     table.cell(us_table, 5, 2, fed_flow_str, text_color=is_core_draining ? color.red : color.lime, text_size=table_size, text_halign=text.align_left)
 
-    table.merge_cells(us_table, 0, 3, 7, 3)
-    table.cell(us_table, 0, 3, final_text, text_color = urgent_alert ? color.rgb(255, 140, 0) : color.white, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
-    
+    table.cell(us_table, 0, 3, "10Y-2Y利差", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 1, 3, str.tostring(yield_spread, "#.##") + " BP", text_color=curve_status_color, text_size=table_size)
+    table.cell(us_table, 2, 3, "曲线形态", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 3, 3, curve_status_text, text_color=curve_status_color, text_size=table_size)
+    table.cell(us_table, 4, 3, "斜率预警", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.merge_cells(us_table, 5, 3, 7, 3)
+    string steepener_warn = is_bull_steepener ? "衰退/流动性枯竭前兆" : is_bear_steepener ? "长端通胀/结构杀估值" : "暂无极端结构异动"
+    table.cell(us_table, 5, 3, steepener_warn, text_color=curve_status_color, text_size=table_size, text_halign=text.align_left)
+
     table.merge_cells(us_table, 0, 4, 7, 4)
-    table.cell(us_table, 0, 4, ai_judgment, text_color = color.rgb(130, 215, 255), text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
+    table.cell(us_table, 0, 4, final_text, text_color = urgent_alert ? color.rgb(255, 140, 0) : color.white, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
+    
+    table.merge_cells(us_table, 0, 5, 7, 5)
+    table.cell(us_table, 0, 5, ai_judgment, text_color = color.rgb(130, 215, 255), text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
