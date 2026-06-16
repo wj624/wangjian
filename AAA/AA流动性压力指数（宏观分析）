@@ -420,16 +420,23 @@ if barstate.islast or barstate.isrealtime
 
     string ai_level_1_raw = "【一阶宏观周期与债务周期】" + (state_blackhole ? "当前处于短期债务周期的严重去杠杆阶段，流动性黑洞吞噬一切风险溢价，系统违背安全边际法则，建议转向现金与极短期美债防御。" : state_stagflation ? "进入滞胀式去杠杆期，通胀顽固高企与实体信用恶化共振，股债双杀风险极大，逢低关注具备抗通胀属性的硬资产（如黄金）与高股息类债核心资产。" : state_supernova ? "处于宏观流动性矩阵（MLM）的绝对扩张象限，充裕资金驱动资产价格重估，顺周期、大盘价值以及具备宽阔护城河的优质标的将显著跑赢。" : state_gold_regime ? "世界秩序与货币体系进入范式转换期，实际利率承压且法币信用长期弱化，贵金属处于主升浪，重点配置黄金及低估值高安全边际的跨市场资产作为对冲。" : "宏观底座与债务周期平稳，无系统性危机信号，投资主线应回归内在价值和 CAPE 估值中枢，由企业盈利驱动。")
     
-    string flow_analysis = "\n🔍【资金动态】" + (max_drain > flow_threshold ? "监测到" + drain_name + "正在密集抽水(-$" + str.tostring(max_drain, "#.##") + "B)，该行为属于" + (drain_name == "国内逆回购" ? "系统内部存量腾挪。" : "外部清算导致的流动性失血。") : "近期系统性抽水动能微弱，") + (min_inject < -flow_threshold ? "目前" + inject_name + "正在通过放水(+$" + str.tostring(math.abs(min_inject), "#.##") + "B)部分对冲市场压力。" : "且市场缺乏显著的外部放水对冲，需警惕流动性真空风险。")
+   // 1. 去掉资金动态开头的换行符，变成独立的 _raw 字符串
+    string flow_analysis_raw = "🔍【资金动态】" + (max_drain > flow_threshold ? "监测到" + drain_name + "正在密集抽水(-$" + str.tostring(max_drain, "#.##") + "B)，该行为属于" + (drain_name == "国内逆回购" ? "系统内部存量腾挪。" : "外部清算导致的流动性失血。") : "近期系统性抽水动能微弱，") + (min_inject < -flow_threshold ? "目前" + inject_name + "正在通过放水(+$" + str.tostring(math.abs(min_inject), "#.##") + "B)部分对冲市场压力。" : "且市场缺乏显著的外部放水对冲，需警惕流动性真空风险。")
     
-    string ai_level_2_raw = "【二阶流动性矩阵与底层水位】" + (is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂，隔夜逆回购(RRP)彻底耗尽，准备金失去关键缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠️总量收缩：全球主要央行处于实质性去杠杆周期，GLI总量萎缩，资金面抽水将严重压制核心权益市场的估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性处于中性平衡带，央行扩表与紧缩力量相互博弈，资本市场由结构性摩擦和存量资金博弈主导。") + (is_sudden_drain ? " (⚠️异常警报：监测到全球总资金池周环比雪崩骤降，警惕极速闪崩！)" : "") + flow_analysis
+    // 2. 二阶文本不再直接粘连资金动态，保持纯净
+    string ai_level_2_raw = "【二阶流动性矩阵与底层水位】" + (is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂，隔夜逆回购(RRP)彻底耗尽，准备金失去关键缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠️总量收缩：全球主要央行处于实质性去杠杆周期，GLI总量萎缩，资金面抽水将严重压制核心权益市场的估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性处于中性平衡带，央行扩表与紧缩力量相互博弈，资本市场由结构性摩擦和存量资金博弈主导。") + (is_sudden_drain ? " (⚠️异常警报：监测到全球总资金池周环比雪崩骤降，警惕极速闪崩！)" : "")
  
+    // 3. 三阶保持不变
     string ai_level_3_raw = "【三阶微观定价与风险溢价】" + (is_bull_steepener ? "🚨【牛陡/衰退预警】短端美债遭遇恐慌性抢筹暴跌，市场正极速定价美联储紧急降息与经济衰退。流动性枯竭前夜，立即转向现金与极短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端美债收益率失控暴涨，期限溢价爆表。长久期资产(如高估值AI/科技股)的折现率地基崩塌，面临惨烈杀估值！" : crisis_signal ? "🔥美债长短端剧烈倒挂叠加信用利差爆表，危机传导链条已打通，风险资产正在被重新定价，切勿逆势接飞刀！" : is_s5th_severe ? "🩸广度指标(S5TH)严重崩塌，绝对空头主导，系统性下杀风险极大，坚决规避缺乏现金流的高估值科技与高波动权益。" : is_s5th_weak_condition ? "📉股指内部动能明显弱化，长短期均线呈现空头排列，建议锁定前期盈利，将仓位向低估值、高派息等具备极强安全边际的标的转移。" : is_credit_spiking ? "⚠️信用利差动量（ROC）短期急速飙升，企业融资环境剧烈恶化，警惕高收益垃圾债违约风险及流动性危机的跨市场传染。" : is_reserve_insufficient ? "⚠️银行系统准备金占GDP及总资产比重双双跌破安全红线，回购市场极度脆弱，随时爆发钱荒冲击波。" : "📈微观交易结构与风险偏好维持稳健，未见极端抛售及恐慌挤兑迹象，维持合理仓位并耐心持有深度价值标的。")    
+    
+    // 4. 将四大模块分别独立进行格式化换行（整齐对齐的核心）
     string ai_level_1 = f_auto_wrap(ai_level_1_raw, 50)
     string ai_level_2 = f_auto_wrap(ai_level_2_raw, 50)
+    string ai_flow    = f_auto_wrap(flow_analysis_raw, 50)
     string ai_level_3 = f_auto_wrap(ai_level_3_raw, 50)
-    string ai_judgment = "🤖【AI 多维系统实时核心研判】\n" + ai_level_1 + "\n" + ai_level_2 + "\n" + ai_level_3
-
+    
+    // 5. 调整拼接顺序与间距：资金动态置顶，并在各模块之间使用 \n\n 增加空行间距
+    string ai_judgment = "🤖【AI 多维系统实时核心研判】\n\n" + ai_flow + "\n\n" + ai_level_1 + "\n\n" + ai_level_2 + "\n\n" + ai_level_3
     table.cell(us_table, 0, 0, "LSI 压力", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
     table.cell(us_table, 1, 0, str.tostring(lsi, "#.##") + " BP", text_color=lsi > threshold_extreme_tight ? color.maroon : lsi >= threshold_tight ? color.red : lsi < 0 ? color.green : #ffffff, text_size=table_size)
     table.cell(us_table, 2, 0, "GLI / 储备", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
