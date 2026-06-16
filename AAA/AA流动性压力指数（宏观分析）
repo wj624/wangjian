@@ -436,7 +436,7 @@ if barstate.islast or barstate.isrealtime
     string ai_level_3 = f_auto_wrap(ai_level_3_raw, 50)
     
     // 5. 调整拼接顺序与间距：资金动态置顶，并在各模块之间使用 \n\n 增加空行间距
-    string ai_judgment = "🤖【AI 多维系统实时核心研判】\n\n" + ai_flow + "\n\n" + ai_level_1 + "\n\n" + ai_level_2 + "\n\n" + ai_level_3
+    string ai_judgment = ai_flow + "\n\n" + ai_level_1 + "\n\n" + ai_level_2 + "\n\n" + ai_level_3
     table.cell(us_table, 0, 0, "LSI 压力", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
     table.cell(us_table, 1, 0, str.tostring(lsi, "#.##") + " BP", text_color=lsi > threshold_extreme_tight ? color.maroon : lsi >= threshold_tight ? color.red : lsi < 0 ? color.green : #ffffff, text_size=table_size)
     table.cell(us_table, 2, 0, "GLI / 储备", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
