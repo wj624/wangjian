@@ -469,4 +469,4 @@ if barstate.islast or barstate.isrealtime
     table.cell(us_table, 0, 4, final_text, text_color = urgent_alert ? color.rgb(255, 140, 0) : color.white, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
     
     table.merge_cells(us_table, 0, 5, 7, 5)
-    table.cell(us_table, 0, 5, ai_judgment, text_color = color.rgb(130, 215, 255), text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
+    table.cell(us_table, 0, 5, ai_judgment, text_color = color.rgb(190, 234, 255), text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
