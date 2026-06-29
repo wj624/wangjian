@@ -36,7 +36,7 @@ string GRP_BOTTOM  = "阶梯抄底与止盈止损 (Trade Plan)"
 string tradeMode     = input.string("左侧抄底 (逆势震荡)", "交易模式 (核心开关)", options=["左侧抄底 (逆势震荡)", "右侧突破 (顺势跟踪)"], group=GRP_BOTTOM, tooltip="切换此选项将彻底改变右下角看板的计算逻辑与显示内容。")
 float  targetAtrMult = input.float(1.0, "入场目标价 ATR 倍数 (缓冲)", step=0.1, minval=0.1, group=GRP_BOTTOM, tooltip="左侧: 支撑位下方接针(扫流动性)距离。右侧: 突破确认缓冲。")
 float  tpAtrMult     = input.float(1.0, "止盈目标价 ATR 倍数 (抢跑)", step=0.1, minval=0.0, group=GRP_BOTTOM, tooltip="在上方POC阻力下方提前抢跑减仓的ATR倍数。")
-float  slAtrMult     = input.float(3, "止损目标价 ATR 倍数 (防守)", step=0.1, minval=0.5, group=GRP_BOTTOM, tooltip="调节止损价距离防守位的ATR向下延伸空间。")
+float  slAtrMult     = input.float(2.5, "止损目标价 ATR 倍数 (防守)", step=0.1, minval=0.5, group=GRP_BOTTOM, tooltip="调节止损价距离防守位的ATR向下延伸空间。必须大于入场ATR倍数，否则止损将高于入场价。建议：止损倍数 > 入场倍数。")
 
 string GRP_ADVANCED = "高级设置 (Advanced)"
 string ltfSelect    = input.string("30", "底层数据精度 (分钟)", options=["1", "5", "15", "30"], group=GRP_ADVANCED, tooltip="选择计算POC所使用的底层数据粒度。做日线波段建议选15或30。")
@@ -186,8 +186,13 @@ method draw(CandleProfile this, int startBar, int endBar, bool isUpLeg, float to
     if extendPoc
         untestedPocs.push(newPoc)
         
-    // 【架构加固】：将历史记忆库的剪裁操作死死锁在分布图生成的瞬间，确保多维数组永远不出界
-    historicalPocs.push(newPoc) 
+    // 【BUG修复】：存入historicalPocs时创建独立副本（深拷贝），与untestedPocs完全解耦
+    // 避免untestedPocs清理操作（set_x2/remove）意外修改historicalPocs中的pocLine引用
+    line pocLCopy = line.new(startBar, this.pocPrice, endBar, this.pocPrice, color=color.new(endC, 0), style=line.style_dashed, width=2)
+    pocLCopy.set_style(line.style_solid)
+    pocLCopy.set_color(color.new(endC, 80))
+    UntestedPOC histPoc = UntestedPOC.new(pocLCopy, this.pocPrice, isUpLeg, endBar, pVol, lVol, pDel)
+    historicalPocs.push(histPoc) 
     if historicalPocs.size() > 50
         historicalPocs.shift()
         
@@ -209,8 +214,9 @@ f_processLeg(int startBar, int endBar, float startPrice, float endPrice, bool is
     array<LTFBar> legBars = array.new<LTFBar>()
     float totalBuy = 0.0
     float totalSell = 0.0
-    float maxH = -1.0
-    float minL = 99999999.0
+    // 【代码质量】：改用na作哨兵值，更符合Pine Script惯例，避免极端价格品种误判
+    float maxH = na
+    float minL = na
     
     for i = 0 to history.size() - 1
         LTFBar b = history.get(i)
@@ -219,10 +225,10 @@ f_processLeg(int startBar, int endBar, float startPrice, float endPrice, bool is
                 legBars.push(b)
                 totalBuy += b.buyV
                 totalSell += b.sellV
-                maxH := maxH == -1.0 ? b.h : math.max(maxH, b.h)
-                minL := minL == 99999999.0 ? b.l : math.min(minL, b.l)
+                maxH := na(maxH) ? b.h : math.max(maxH, b.h)
+                minL := na(minL) ? b.l : math.min(minL, b.l)
         
-    if legBars.size() > 0 and maxH != -1.0
+    if legBars.size() > 0 and not na(maxH)
         float groupRange = maxH - minL
         float safeBase = math.max(nz(baseBoxHeight, syminfo.mintick * 10), syminfo.mintick)
         
@@ -234,6 +240,7 @@ f_processLeg(int startBar, int endBar, float startPrice, float endPrice, bool is
         
     array<LTFBar> newHistory = array.new<LTFBar>()
     for i = 0 to history.size() - 1
+        // 锁定修复：改回 >=，让拐点K线的成交量顺利留给下一个波段，恢复丝滑分布
         if history.get(i).chartBar >= endBar
             newHistory.push(history.get(i))
     newHistory
@@ -264,7 +271,7 @@ else
     float sellVol = v * (high - close) / rng
     ltfHistory.push(LTFBar.new(bar_index, high, low, v, buyVol, sellVol))
 
-if ltfHistory.size() > 50000
+if ltfHistory.size() > 5000
     ltfHistory.shift()
 
 //---------------------------------------------------------------------------------------------------------------------}
@@ -422,13 +429,16 @@ float safeGlobalAtr14 = nz(globalAtr14, syminfo.mintick * 10)
 
 // 【用户核心修正：还原左侧抄底减法逻辑】
 // 使用减号（-），实现在核心支撑带下方深水区进行极值接盘或捕获扫损流动性。
+// 【隐患修复】：强制slAtrMult不小于targetAtrMult，杜绝止损价高于入场价的极端参数悖论
+float safeSlAtrMult = math.max(slAtrMult, targetAtrMult + syminfo.mintick / math.max(safeGlobalAtr14, syminfo.mintick))
+
 float leftT1 = na, float leftT2 = na, float leftTp = na, float leftSl1 = na, float leftSl2 = na
 if not na(poc1)
     leftT1 := poc1 - (safeGlobalAtr14 * targetAtrMult) 
-    leftSl1 := poc1 - (safeGlobalAtr14 * slAtrMult)
+    leftSl1 := poc1 - (safeGlobalAtr14 * safeSlAtrMult)
 if not na(poc2)
     leftT2 := poc2 - (safeGlobalAtr14 * targetAtrMult)
-    leftSl2 := poc2 - (safeGlobalAtr14 * slAtrMult)
+    leftSl2 := poc2 - (safeGlobalAtr14 * safeSlAtrMult)
 if not na(tpPoc1)
     leftTp := tpPoc1 - (safeGlobalAtr14 * tpAtrMult)
 
@@ -446,28 +456,29 @@ else if not na(poc1)
     structuralBaseSl := poc1
 
 if not na(structuralBaseSl)
-    rightSl := structuralBaseSl - (safeGlobalAtr14 * slAtrMult)
+    rightSl := structuralBaseSl - (safeGlobalAtr14 * safeSlAtrMult)
 
 if not isSkyHighMode and not na(tpPoc1)
     rightNextTp := tpPoc1 - (safeGlobalAtr14 * tpAtrMult) 
-else if not na(currentAvwap)
-    rightNextTp := currentAvwap + (safeGlobalAtr14 * tpAtrMult * 2.0) 
+else if not na(rightBo)
+    // 【BUG修复】：isSkyHighMode下以rightBo为基准向上延伸，保证止盈价永远高于开仓价，杜绝倒挂
+    rightNextTp := rightBo + (safeGlobalAtr14 * tpAtrMult * 2.0) 
 
 // 绘制右侧专属动态防守射线
 if barstate.islast and not isLeft
     if not na(poc1)
-        line.new(bar_index - 30, poc1, bar_index, poc1, color=color.new(color.green, 20), style=line.style_dashed, width=2)
+        line.new(bar_index - 30, poc1, bar_index, poc1, color=color.new(color.green, 20), style=line.style_dashed, width=1)
         label.new(bar_index - 30, poc1, "右侧防守-历史核心支撑", color=color.new(color.green, 80), textcolor=color.green, size=size.tiny, style=label.style_label_right)
     if not isSkyHighMode and not na(tpPoc1)
-        line.new(bar_index - 30, tpPoc1, bar_index, tpPoc1, color=color.new(color.orange, 20), style=line.style_dashed, width=2)
+        line.new(bar_index - 30, tpPoc1, bar_index, tpPoc1, color=color.new(color.orange, 20), style=line.style_dashed, width=1)
         label.new(bar_index - 30, tpPoc1, "右侧目标-上方筹码阻力", color=color.new(color.orange, 80), textcolor=color.orange, size=size.tiny, style=label.style_label_right)
 
-plot(isLeft ? leftTp : na, title="左侧止盈目标", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=2)
-plot(isLeft ? leftT1 : na, title="左侧抄底目标1", color=color.new(color.aqua, 20), style=plot.style_circles, linewidth=2)
-plot(isLeft ? leftT2 : na, title="左侧抄底目标2", color=color.new(color.blue, 20), style=plot.style_circles, linewidth=2)
-plot(not isLeft ? rightBo : na, title="右侧突破开仓价", color=color.new(color.fuchsia, 20), style=plot.style_circles, linewidth=2)
-plot(not isLeft ? rightNextTp : na, title="右侧保守目标价", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=2)
-plot(not isLeft ? rightSl : na, title="右侧防守止损价", color=color.new(color.red, 20), style=plot.style_circles, linewidth=2)
+plot(isLeft ? leftTp : na, title="左侧止盈目标", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=1)
+plot(isLeft ? leftT1 : na, title="左侧抄底目标1", color=color.new(color.aqua, 20), style=plot.style_circles, linewidth=1)
+plot(isLeft ? leftT2 : na, title="左侧抄底目标2", color=color.new(color.blue, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightBo : na, title="右侧突破开仓价", color=color.new(color.fuchsia, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightNextTp : na, title="右侧保守目标价", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightSl : na, title="右侧防守止损价", color=color.new(color.red, 20), style=plot.style_circles, linewidth=1)
 // ====================================================================================================================}
 // 追加：用于在数据窗口(Data Window)实时显示的左侧风控数据
 // ===================================================================================================================={
@@ -481,6 +492,7 @@ plot(isLeft ? leftSl2 : na, title="数据窗口-左侧止损2", color=color.new(
 float dataWindowRr = na
 if isLeft and not na(leftT1) and not na(leftTp) and leftT1 > 0 and not na(leftSl1)
     float reward = leftTp - leftT1
+    // 【一致性】：risk计算与实际止损保持同源，均使用safeSlAtrMult
     float risk = math.max(leftT1 - leftSl1, syminfo.mintick)
     if risk > 0 and reward > 0
         dataWindowRr := reward / risk
@@ -516,7 +528,8 @@ if barstate.islast
     else if not isLeft and not na(rightBo)
         float currentVolRatio = ta.sma(safeVolume, 20) > 0 ? safeVolume / ta.sma(safeVolume, 20) : 1.0
         int scoreF1 = currentVolRatio >= bubbleMult ? 30 : (currentVolRatio >= 1.2 ? 15 : 5)
-        int scoreF2 = close >= currentAvwap ? 25 : 5
+        // 【隐患修复】：currentAvwap为na时给中性分10分，避免na条件下close>=na=false误判为空头扣分
+        int scoreF2 = na(currentAvwap) ? 10 : (close >= currentAvwap ? 25 : 5)
         int scoreF3 = 15
         if not na(rightSl) and rightBo > rightSl
             // 引入 math.max 保底保障盈亏比计算永远不被 0 除而崩溃
@@ -653,7 +666,8 @@ if barstate.islast
             table.cell(targetTable, 4, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
 
         string trendState = na(currentAvwap) ? "--" : (close >= currentAvwap ? "多头趋势" : "空头趋势")
-        color trendColor = close >= currentAvwap ? color.green : color.red
+        // 【隐患修复】：currentAvwap为na时显示灰色，避免无数据时误显红色造成假信号
+        color trendColor = na(currentAvwap) ? color.gray : (close >= currentAvwap ? color.green : color.red)
         table.cell(targetTable, 0, 3, "生命线 (AVWAP)", text_color=avwapC, text_size=size.small, text_halign=text.align_left)
         table.cell(targetTable, 1, 3, not na(currentAvwap) ? str.tostring(currentAvwap, format.mintick) : "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
         table.cell(targetTable, 2, 3, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
@@ -688,8 +702,12 @@ if barstate.islast
         table.cell(targetTable, 4, 5, not na(rightBo) ? scoreText : "--", text_color=scoreColor, text_size=size.small, text_halign=text.align_right)
 
 // ====================================================================================================================}
-// 警报系统 
-// ===================================================================================================================={
+// 警报系统 (真正终极全能完整版 - 兼顾左侧极限接针与右侧收线防守)
+// ====================================================================================================================}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 【左侧交易模式警报】: 维持盘中实时触及逻辑 (接针需要极速响应，无需等待收线)
+// ---------------------------------------------------------------------------------------------------------------------
 bool crossLeftT1 = ta.crossunder(low, leftT1)
 bool crossLeftT2 = ta.crossunder(low, leftT2)
 bool crossLeftTp = ta.crossover(high, leftTp) 
@@ -703,17 +721,20 @@ if crossLeftT2 and isLeft
 if crossLeftTp and isLeft
     alert("【左侧止盈】" + syminfo.ticker + " 已向上触及阻力卖出区: " + str.tostring(leftTp, format.mintick), alert.freq_once_per_bar)
 
-// 【放宽后的合理突破判定】
+// ---------------------------------------------------------------------------------------------------------------------
+// 【右侧交易模式警报】: 严格引入 [1] 历史算子锁定，全面实行“收盘既定事实”防闪烁
+// ---------------------------------------------------------------------------------------------------------------------
 bool isVolBreakout = safeVolume > ta.sma(safeVolume, 20) * 1.2
-bool crossRightBo = ta.crossover(close, rightBo) and isVolBreakout
-bool crossRightSl = ta.crossunder(close, rightSl)
 
-if crossRightBo and not isLeft
-    alert("【右侧放量突破】" + syminfo.ticker + " 价格带量强势突破 AVWAP 确认开仓价: " + str.tostring(rightBo, format.mintick), alert.freq_once_per_bar)
+// 核心逻辑加固：将 crossover 趋势判定与量能爆发同步回溯一格，对齐昨收状态
+bool crossRightBoConfirmed = ta.crossover(close, rightBo)[1] and isVolBreakout[1]
+bool crossRightSlConfirmed = ta.crossunder(close, rightSl)[1]
 
-if crossRightSl and not isLeft
-    alert("【右侧破位止损】" + syminfo.ticker + " 向下击穿多头核心防守线: " + str.tostring(rightSl, format.mintick), alert.freq_once_per_bar)
+if crossRightBoConfirmed and not isLeft
+    alert("【右侧放量突破确认】" + syminfo.ticker + " 价格已收盘强势突破 AVWAP 确认开仓价: " + str.tostring(rightBo[1], format.mintick), alert.freq_once_per_bar)
 
+if crossRightSlConfirmed and not isLeft
+    alert("【右侧破位止损确认】" + syminfo.ticker + " 向下收盘击穿多头核心防守线: " + str.tostring(rightSl[1], format.mintick), alert.freq_once_per_bar)
 // ====================================================================================================================}
 // 【执行清理与虚线剪裁机制】
 // ===================================================================================================================={
