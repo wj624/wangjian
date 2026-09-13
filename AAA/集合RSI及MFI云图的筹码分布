@@ -1,0 +1,835 @@
+//@version=6
+indicator("Structural Leg Profiler + 异常量AVWAP (全场景实战终极版)", "波段分布图+AVWAP+云图", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 输入设置 (Inputs)
+//---------------------------------------------------------------------------------------------------------------------{
+string GRP_SWING   = "波段检测 (Swing Detection)"
+int    atrPeriod   = input.int(5, "ATR 周期", group=GRP_SWING)
+float  swingMult   = input.float(2.5, "波段乘数 (ATR)", step=0.1, group=GRP_SWING, tooltip="较高的值会捕捉更大的结构波段。较低的值则捕捉微小波段。")
+
+string GRP_PROFILE = "分布图设置 (Profile Settings)"
+int    maxBoxes    = input.int(20, "最大分布框数量", minval=10, maxval=150, group=GRP_PROFILE)
+string alignMode   = input.string("左侧", "分布图对齐方式", options=["左侧", "右侧", "居中"], group=GRP_PROFILE)
+bool   showBoxVol  = input.bool(true, "在框内显示成交量数值", group=GRP_PROFILE)
+bool   extendPoc   = input.bool(true, "延伸未测试的 POC (控制点)", group=GRP_PROFILE, tooltip="向前延伸控制点 (POC) 线，直到价格触及并测试它。")
+
+string GRP_BUBBLES = "成交量异常 (Volume Anomalies)"
+bool   showBubbles = input.bool(true, "显示成交量气泡", group=GRP_BUBBLES)
+float  bubbleMult  = input.float(2.0, "激增阈值 (x SMA)", step=0.1, group=GRP_BUBBLES, tooltip="高亮显示成交量大于 20 周期平均值 X 倍的K线。")
+bool   showAvwap   = input.bool(true, "叠加异常量 AVWAP", group=GRP_BUBBLES, tooltip="以最近一次成交量激增的K线为起点，动态计算VWAP资金成本线。") 
+
+string GRP_COLORS  = "样式与颜色 (Style & Colors)"
+string colorMode   = input.string("成交量渐变", "分布框颜色模式", options=["成交量渐变", "多空差值 (买入 vs 卖出)"], group=GRP_COLORS)
+
+color  upStartC    = input.color(color.new(#01579B, 0), "上涨波段 (低量)", group=GRP_COLORS, inline="up")
+color  upMidC      = input.color(color.new(#2962FF, 0), "上涨波段 (中量)", group=GRP_COLORS, inline="up")
+color  upEndC      = input.color(color.new(#00E5FF, 0), "上涨波段 (高量)", group=GRP_COLORS, inline="up")
+
+color  dnStartC    = input.color(color.new(#311B92, 0), "下跌波段 (低量)", group=GRP_COLORS, inline="dn")
+color  dnMidC      = input.color(color.new(#C51162, 0), "下跌波段 (中量)", group=GRP_COLORS, inline="dn")
+color  dnEndC      = input.color(color.new(#FF5252, 0), "下跌波段 (高量)", group=GRP_COLORS, inline="dn")
+
+color  avwapC      = input.color(color.new(#9b03a8, 0), "异常量 AVWAP 颜色", group=GRP_COLORS) 
+
+string GRP_BOTTOM  = "阶梯抄底与止盈止损 (Trade Plan)"
+string tradeMode     = input.string("左侧抄底 (逆势震荡)", "交易模式 (核心开关)", options=["左侧抄底 (逆势震荡)", "右侧突破 (顺势跟踪)"], group=GRP_BOTTOM, tooltip="切换此选项将彻底改变右下角看板的计算逻辑与显示内容。")
+float  targetAtrMult = input.float(1.0, "入场目标价 ATR 倍数 (缓冲)", step=0.1, minval=0.1, group=GRP_BOTTOM, tooltip="左侧: 支撑位下方接针(扫流动性)距离。右侧: 突破确认缓冲。")
+float  tpAtrMult     = input.float(1.0, "止盈目标价 ATR 倍数 (抢跑)", step=0.1, minval=0.0, group=GRP_BOTTOM, tooltip="在上方POC阻力下方提前抢跑减仓的ATR倍数。")
+float  slAtrMult     = input.float(2.5, "止损目标价 ATR 倍数 (防守)", step=0.1, minval=0.5, group=GRP_BOTTOM, tooltip="调节止损价距离防守位的ATR向下延伸空间。必须大于入场ATR倍数，否则止损将高于入场价。建议：止损倍数 > 入场倍数。")
+
+string GRP_ADVANCED = "高级设置 (Advanced)"
+string ltfSelect    = input.string("30", "底层数据精度 (分钟)", options=["1", "5", "15", "30"], group=GRP_ADVANCED, tooltip="选择计算POC所使用的底层数据粒度。做日线波段建议选15或30。")
+
+// ==================== 💎 新增：RSI & MFI 主图自适应云图设置 ====================
+string GRP_OSC_MAP  = "RSI & MFI 主图云图 (周期与映射)"
+int    rsiLen       = input.int(14, "RSI 周期", minval=1, group=GRP_OSC_MAP)
+int    mfiLen       = input.int(14, "MFI 周期", minval=1, group=GRP_OSC_MAP)
+int    pctLen       = input.int(100, "自适应分位数通道周期", minval=20, group=GRP_OSC_MAP)
+int    mapLookback  = input.int(60, "价格映射回溯视窗", minval=10, maxval=300, tooltip="根据该周期内的极值将 0-100 映射到 K 线价格区间", group=GRP_OSC_MAP)
+bool   showOscLines = input.bool(false, "【主图】显示映射后的 RSI/MFI 原生折线", group=GRP_OSC_MAP)
+
+string GRP_RSI_C    = "RSI 云图样式"
+bool   showRsiCloud = input.bool(true, "显示 RSI 云图", group=GRP_RSI_C)
+color  pctColorUp   = input.color(#ff00aa, "RSI 超买边界色", group=GRP_RSI_C)
+color  pctColorDn   = input.color(#00ffaa, "RSI 超卖边界色", group=GRP_RSI_C)
+color  pctFillColor = input.color(#9c27b0, "RSI 基础填充色", group=GRP_RSI_C)
+int    pctFillTrans = input.int(84, "RSI 基础透明度", minval=0, maxval=100, group=GRP_RSI_C)
+
+string GRP_MFI_C    = "MFI 资金云图样式"
+bool   showMfiCloud = input.bool(true, "显示 MFI 云图", group=GRP_MFI_C)
+color  mfiPctColorUp  = input.color(#ff9800, "MFI 超买边界色", group=GRP_MFI_C)
+color  mfiPctColorDn  = input.color(#e0a800, "MFI 超卖边界色", group=GRP_MFI_C)
+color  mfiPctFillColor= input.color(#008cff, "MFI 基础填充色", group=GRP_MFI_C)
+int    mfiPctFillTrans= input.int(82, "MFI 基础透明度", minval=0, maxval=100, group=GRP_MFI_C)
+
+string GRP_CROSS_C  = "云图越界异动填充"
+bool   showCrossFill = input.bool(true, "显示 RSI/MFI 上下沿越界异动填充", group=GRP_CROSS_C)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 类型定义
+//---------------------------------------------------------------------------------------------------------------------{
+type LTFBar
+    int chartBar
+    float h
+    float l
+    float v
+    float buyV
+    float sellV
+
+type CandleProfile
+    float profileHigh
+    float profileLow
+    int   numBoxes
+    float boxHeight
+    array<float> volumeDistribution
+    array<float> deltaDistribution
+    float maxVolumeInProfile
+    int   maxVolumeIndex
+    float pocPrice
+
+type UntestedPOC
+    line  pocLine
+    float price
+    bool  isBull
+    int   endBar
+    float pocVol     
+    float legVol     
+    float pocDelta   
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 状态变量
+//---------------------------------------------------------------------------------------------------------------------{
+var array<LTFBar>      ltfHistory   = array.new<LTFBar>()
+var array<UntestedPOC> untestedPocs = array.new<UntestedPOC>()
+var array<UntestedPOC> historicalPocs = array.new<UntestedPOC>() 
+
+var int   zzDir          = 1
+var float zzHigh         = high
+var int   zzHighBar      = bar_index
+var float zzLow          = low
+var int   zzLowBar       = bar_index
+var int   lastPivotBar   = bar_index
+var float lastPivotPrice = close
+
+var float avwapCumVol = 0.0
+var float avwapCumSrc = 0.0
+var bool  isAvwapActive = false
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 方法与函数
+//---------------------------------------------------------------------------------------------------------------------{
+f_buildVolumeBar(int filledBlocks, int totalBlocks) =>
+    string result = ""
+    for i = 1 to totalBlocks
+        result += i <= filledBlocks ? "█" : "░"
+    result
+
+f_createProfile(float legHigh, float legLow, float targetBoxHeight, array<LTFBar> legBars) =>
+    float barRange = math.max(legHigh - legLow, syminfo.mintick) 
+    int numBoxes = math.max(1, int(math.round(barRange / targetBoxHeight)))
+    
+    numBoxes := math.min(numBoxes, maxBoxes) 
+    
+    float adjustedBoxHeight = barRange / numBoxes
+    array<float> volDist = array.new_float(numBoxes, 0.0)
+    array<float> deltaDist = array.new_float(numBoxes, 0.0)
+    
+    for i = 0 to legBars.size() - 1
+        LTFBar b = legBars.get(i)
+        float ltfBarRange = math.max(b.h - b.l, syminfo.mintick)
+        
+        for boxIndex = 0 to numBoxes - 1
+            float boxBottom = legLow + (boxIndex * adjustedBoxHeight)
+            float boxTop = boxBottom + adjustedBoxHeight
+            float overlapHeight = math.max(0, math.min(boxTop, b.h) - math.max(boxBottom, b.l))
+            
+            if overlapHeight > 0
+                float overlapRatio = overlapHeight / ltfBarRange
+                float volContrib = nz(b.v * overlapRatio)
+                float buyContrib = nz(b.buyV * overlapRatio)
+                float sellContrib = nz(b.sellV * overlapRatio)
+       
+                volDist.set(boxIndex, volDist.get(boxIndex) + volContrib)
+                deltaDist.set(boxIndex, deltaDist.get(boxIndex) + (buyContrib - sellContrib))
+                
+    float maxVolume = volDist.max()
+    int maxVolIdx = math.max(0, volDist.indexof(nz(maxVolume, 0.0))) 
+    float pocPrice = legLow + (maxVolIdx * adjustedBoxHeight) + (adjustedBoxHeight / 2)
+    
+    CandleProfile.new(legHigh, legLow, numBoxes, adjustedBoxHeight, volDist, deltaDist, maxVolume, maxVolIdx, pocPrice)
+
+method draw(CandleProfile this, int startBar, int endBar, bool isUpLeg, float totalBuyVol, float totalSellVol) =>
+    int bLeft = startBar
+    int bRight = math.max(startBar + 1, endBar)
+    int totalBlocks = math.max(5, math.min(30, int(15 * ((bRight - bLeft) / 50.0))))
+
+    color startC = isUpLeg ? upStartC : dnStartC
+    color midC   = isUpLeg ? upMidC : dnMidC
+    color endC   = isUpLeg ? upEndC : dnEndC
+    
+    string parsedAlign = alignMode == "左侧" ? text.align_left : alignMode == "右侧" ? text.align_right : text.align_center
+    
+    for i = 0 to this.numBoxes - 1
+        float currentBoxVolume = this.volumeDistribution.get(i)
+        float currentBoxDelta = this.deltaDistribution.get(i)
+        float boxBottom = this.profileLow + (i * this.boxHeight)
+        float boxTop = boxBottom + this.boxHeight
+        
+        if currentBoxVolume > 0
+            int filledBlocks = this.maxVolumeInProfile > 0 ? int(math.round((currentBoxVolume / this.maxVolumeInProfile) * totalBlocks)) : 0
+            string boxText = f_buildVolumeBar(filledBlocks, totalBlocks)
+            if showBoxVol
+                boxText += " " + (currentBoxVolume == math.round(currentBoxVolume) ? str.tostring(currentBoxVolume, "#") : str.tostring(currentBoxVolume, format.volume))
+            
+            color textColor = na
+            if colorMode == "多空差值 (买入 vs 卖出)"
+                if currentBoxDelta > 0
+                    textColor := color.from_gradient(currentBoxDelta, 0, this.maxVolumeInProfile, color.new(color.green, 60), color.new(color.green, 0))
+                else if currentBoxDelta < 0
+                    textColor := color.from_gradient(math.abs(currentBoxDelta), 0, this.maxVolumeInProfile, color.new(color.red, 60), color.new(color.red, 0))
+                else
+                    textColor := color.gray
+            else
+                if i < this.maxVolumeIndex
+                    textColor := color.from_gradient(i, 0, this.maxVolumeIndex, startC, midC)
+                else if i > this.maxVolumeIndex
+                    textColor := color.from_gradient(i, this.maxVolumeIndex, this.numBoxes - 1, midC, endC)
+                else
+                    textColor := midC
+          
+            color bgC = color.new(textColor, 90)
+            box.new(left=bLeft, top=boxTop, right=bRight, bottom=boxBottom, border_color=color(na), bgcolor=bgC, text=boxText, text_size=size.small, text_color=textColor, text_halign=parsedAlign, text_valign=text.align_center, text_wrap=text.wrap_none, text_font_family=font.family_monospace)
+            
+    line pocL = line.new(startBar, this.pocPrice, endBar, this.pocPrice, color=color.new(endC, 0), style=line.style_dashed, width=2)
+    
+    float pVol = this.volumeDistribution.get(this.maxVolumeIndex)
+    float pDel = this.deltaDistribution.get(this.maxVolumeIndex)
+    float lVol = totalBuyVol + totalSellVol
+    UntestedPOC newPoc = UntestedPOC.new(pocL, this.pocPrice, isUpLeg, endBar, pVol, lVol, pDel)
+    
+    if extendPoc
+        untestedPocs.push(newPoc)
+        
+    line pocLCopy = line.new(startBar, this.pocPrice, endBar, this.pocPrice, color=color.new(endC, 0), style=line.style_dashed, width=2)
+    pocLCopy.set_style(line.style_solid)
+    pocLCopy.set_color(color.new(endC, 80))
+    UntestedPOC histPoc = UntestedPOC.new(pocLCopy, this.pocPrice, isUpLeg, endBar, pVol, lVol, pDel)
+    historicalPocs.push(histPoc) 
+    if historicalPocs.size() > 50
+        historicalPocs.shift()
+        
+    float delta = totalBuyVol - totalSellVol
+    color deltaColor = delta > 0 ? color.green : color.red
+    string deltaSign = delta > 0 ? "+" : ""
+    
+    string summaryText = "波段量: " + str.tostring(totalBuyVol + totalSellVol, format.volume) + "\n" +
+                         "多空差(Delta): " + deltaSign + str.tostring(delta, format.volume) + "\n" +
+                         "控制点(POC): " + str.tostring(this.pocPrice, format.mintick)
+               
+    int midBar = int(math.round((startBar + endBar) / 2))
+    float summaryY = isUpLeg ? this.profileHigh : this.profileLow
+    label.new(midBar, summaryY, text=summaryText, color=color.new(chart.bg_color, 20), style=isUpLeg ? label.style_label_down : label.style_label_up, textcolor=deltaColor, size=size.tiny)
+
+f_processLeg(int startBar, int endBar, float startPrice, float endPrice, bool isUpLeg, array<LTFBar> history, float baseBoxHeight) =>
+    line.new(startBar, startPrice, endBar, endPrice, color=color.new(color.gray, 50), width=2, style=line.style_dotted)
+    
+    array<LTFBar> legBars = array.new<LTFBar>()
+    float totalBuy = 0.0
+    float totalSell = 0.0
+    float maxH = na
+    float minL = na
+    
+    for i = 0 to history.size() - 1
+        LTFBar b = history.get(i)
+        if b.chartBar >= startBar and b.chartBar <= endBar
+            if not na(b.h) and not na(b.l)
+                legBars.push(b)
+                totalBuy += b.buyV
+                totalSell += b.sellV
+                maxH := na(maxH) ? b.h : math.max(maxH, b.h)
+                minL := na(minL) ? b.l : math.min(minL, b.l)
+        
+    if legBars.size() > 0 and not na(maxH)
+        float groupRange = maxH - minL
+        float safeBase = math.max(nz(baseBoxHeight, syminfo.mintick * 10), syminfo.mintick)
+        
+        float targetBoxHeight = (groupRange / safeBase) > maxBoxes ? groupRange / maxBoxes : safeBase
+        targetBoxHeight := math.max(nz(targetBoxHeight, syminfo.mintick), syminfo.mintick)
+        
+        CandleProfile profile = f_createProfile(maxH, minL, targetBoxHeight, legBars)
+        profile.draw(startBar, endBar, isUpLeg, totalBuy, totalSell)
+        
+    array<LTFBar> newHistory = array.new<LTFBar>()
+    for i = 0 to history.size() - 1
+        if history.get(i).chartBar >= endBar
+            newHistory.push(history.get(i))
+    newHistory
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 数据获取与累积 
+//---------------------------------------------------------------------------------------------------------------------{
+[ltfOpens, ltfHighs, ltfLows, ltfCloses, ltfVolumes] = request.security_lower_tf(syminfo.tickerid, ltfSelect, [open, high, low, close, volume])
+
+if ltfHighs.size() > 0
+    for i = 0 to ltfHighs.size() - 1
+        float h = ltfHighs.get(i)
+        float l = ltfLows.get(i)
+        float c = ltfCloses.get(i)
+        float rawV = ltfVolumes.get(i)
+        
+        float v = na(rawV) or rawV == 0 ? 1.0 : rawV
+        float rng = math.max(h - l, syminfo.mintick)
+        float buyVol = v * (c - l) / rng
+        float sellVol = v * (h - c) / rng
+        
+        ltfHistory.push(LTFBar.new(bar_index, h, l, v, buyVol, sellVol))
+else
+    float rawV = volume
+    float v = na(rawV) or rawV == 0 ? 1.0 : rawV 
+    float rng = math.max(high - low, syminfo.mintick)
+    float buyVol = v * (close - low) / rng
+    float sellVol = v * (high - close) / rng
+    ltfHistory.push(LTFBar.new(bar_index, high, low, v, buyVol, sellVol))
+
+if ltfHistory.size() > 5000
+    ltfHistory.shift()
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 波段逻辑与分布图
+//---------------------------------------------------------------------------------------------------------------------{
+float globalAtr = ta.atr(atrPeriod)
+float globalAtr14 = ta.atr(14)
+float safeAtrSwing = nz(globalAtr, syminfo.mintick * 10)
+float revAmount = safeAtrSwing * swingMult
+
+bool isSwingHigh = false
+bool isSwingLow = false
+
+if zzDir == 1
+    if high > zzHigh
+        zzHigh := high
+        zzHighBar := bar_index
+    if low < zzHigh - revAmount
+        zzDir := -1
+        zzLow := low
+        zzLowBar := bar_index
+        isSwingHigh := true
+else
+    if low < zzLow
+        zzLow := low
+        zzLowBar := bar_index
+    if high > zzLow + revAmount
+        zzDir := 1
+        zzHigh := high
+        zzHighBar := bar_index
+        isSwingLow := true
+
+if isSwingHigh
+    float boxHeightLimit = nz(globalAtr14, syminfo.mintick * 10) / 10
+    ltfHistory := f_processLeg(lastPivotBar, zzHighBar, lastPivotPrice, zzHigh, true, ltfHistory, boxHeightLimit)
+    lastPivotBar := zzHighBar
+    lastPivotPrice := zzHigh
+
+if isSwingLow
+    float boxHeightLimit = nz(globalAtr14, syminfo.mintick * 10) / 10
+    ltfHistory := f_processLeg(lastPivotBar, zzLowBar, lastPivotPrice, zzLow, false, ltfHistory, boxHeightLimit)
+    lastPivotBar := zzLowBar
+    lastPivotPrice := zzLow
+
+//---------------------------------------------------------------------------------------------------------------------}
+// 成交量异常气泡 + AVWAP 逻辑 
+//---------------------------------------------------------------------------------------------------------------------{
+bool triggerAvwapReset = false
+float safeVolume = na(volume) or volume == 0 ? 1.0 : volume
+var bool isCurrentVolAnomalous = false 
+isCurrentVolAnomalous := false
+
+if showBubbles or showAvwap
+    float volSma = ta.sma(safeVolume, 20)
+    if volSma > 0
+        float volRatio = safeVolume / volSma
+        if volRatio >= bubbleMult
+            triggerAvwapReset := true 
+            isCurrentVolAnomalous := true 
+            
+            if showBubbles
+                bool isBull = close >= open
+                color bubColor = isBull ? color.new(upEndC, 40) : color.new(dnEndC, 40)
+                
+                string dynSizeConst = size.small
+                if volRatio >= 3.0
+                    dynSizeConst := size.large
+                else if volRatio >= 2.0
+                    dynSizeConst := size.normal
+                    
+                string bubText = volRatio >= (bubbleMult * 1.5) ? str.tostring(volume, format.volume) : ""
+                
+                label.new(bar_index, hl2, text=bubText, color=bubColor, 
+                          style=label.style_circle, textcolor=color.white, 
+                          size=dynSizeConst, tooltip="成交量激增: " + str.tostring(volRatio, "#.##") + "倍\nAVWAP 将以此K线为新锚点")
+
+float typicalPrice = hlc3
+
+if showAvwap
+    if triggerAvwapReset
+        avwapCumVol := safeVolume
+        avwapCumSrc := typicalPrice * safeVolume
+        isAvwapActive := true
+    else if isAvwapActive
+        avwapCumVol += safeVolume
+        avwapCumSrc += typicalPrice * safeVolume
+
+float currentAvwap = (showAvwap and isAvwapActive) ? (avwapCumSrc / avwapCumVol) : na
+plot(currentAvwap, title="异常量 AVWAP", color=avwapC, linewidth=2, style=plot.style_linebr)
+
+if triggerAvwapReset and showAvwap
+    label.new(bar_index, currentAvwap, text="AVWAP\n重置", style=label.style_label_up, size=size.small, color=color.new(avwapC, 70), textcolor=color.white, yloc=yloc.price)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// ====================================================================================================================}
+// 核心：全天候双模交易计划引擎 + 胜率打分评估
+// ===================================================================================================================={
+bool isLeft = tradeMode == "左侧抄底 (逆势震荡)"
+
+float poc1 = na 
+float poc2 = na 
+float dist1 = 999999.0
+float dist2 = 999999.0
+
+float tpPoc1 = na 
+float tpPoc2 = na 
+float tpDist1 = 999999.0
+float tpDist2 = 999999.0
+
+UntestedPOC leftPocObj = na  
+UntestedPOC rightPocObj = na 
+
+array<UntestedPOC> sourcePocs = isLeft ? untestedPocs : historicalPocs
+
+if sourcePocs.size() > 0
+    for i = 0 to sourcePocs.size() - 1
+        UntestedPOC p = sourcePocs.get(i)
+        
+        if p.price < close 
+            float dist = close - p.price
+            if dist < dist1
+                dist2 := dist1
+                poc2 := poc1
+                dist1 := dist
+                poc1 := p.price
+                leftPocObj := p
+            else if dist < dist2 and p.price != poc1
+                dist2 := dist
+                poc2 := p.price
+                
+        if p.price > close
+            float d = p.price - close
+            if d < tpDist1
+                tpDist2 := tpDist1
+                tpPoc2 := tpPoc1
+                tpDist1 := d
+                tpPoc1 := p.price
+                rightPocObj := p
+            else if d < tpDist2 and p.price != tpPoc1
+                tpDist2 := d
+                tpPoc2 := p.price
+
+string tpLabelLeft = "上方阻力 (POC)"
+bool isSkyHighMode = false 
+
+if na(tpPoc1)
+    if not na(zzHigh) and zzHigh > close
+        tpPoc1 := zzHigh
+        tpLabelLeft := "上方阻力 (前高)"
+    else
+        tpLabelLeft := "上方阻力 (无)"
+    isSkyHighMode := true
+
+float safeGlobalAtr14 = nz(globalAtr14, syminfo.mintick * 10)
+float safeSlAtrMult = math.max(slAtrMult, targetAtrMult + syminfo.mintick / math.max(safeGlobalAtr14, syminfo.mintick))
+
+float leftT1 = na, float leftT2 = na, float leftTp = na, float leftSl1 = na, float leftSl2 = na
+if not na(poc1)
+    leftT1 := poc1 - (safeGlobalAtr14 * targetAtrMult) 
+    leftSl1 := poc1 - (safeGlobalAtr14 * safeSlAtrMult)
+if not na(poc2)
+    leftT2 := poc2 - (safeGlobalAtr14 * targetAtrMult)
+    leftSl2 := poc2 - (safeGlobalAtr14 * safeSlAtrMult)
+if not na(tpPoc1)
+    leftTp := tpPoc1 - (safeGlobalAtr14 * tpAtrMult)
+
+// --- 【右侧核心风控与底线逻辑】 ---
+float rightBo = na, float rightSl = na, float rightNextTp = na
+
+if not na(currentAvwap)
+    rightBo := currentAvwap + (safeGlobalAtr14 * targetAtrMult) 
+
+float structuralBaseSl = currentAvwap
+if not na(poc1) and not na(currentAvwap)
+    structuralBaseSl := math.min(poc1, currentAvwap)
+else if not na(poc1)
+    structuralBaseSl := poc1
+
+if not na(structuralBaseSl)
+    rightSl := structuralBaseSl - (safeGlobalAtr14 * safeSlAtrMult)
+
+if not isSkyHighMode and not na(tpPoc1)
+    rightNextTp := tpPoc1 - (safeGlobalAtr14 * tpAtrMult) 
+else if not na(rightBo)
+    rightNextTp := rightBo + (safeGlobalAtr14 * tpAtrMult * 2.0) 
+
+if barstate.islast and not isLeft
+    if not na(poc1)
+        line.new(bar_index - 30, poc1, bar_index, poc1, color=color.new(color.green, 20), style=line.style_dashed, width=1)
+        label.new(bar_index - 30, poc1, "右侧防守-历史核心支撑", color=color.new(color.green, 80), textcolor=color.green, size=size.tiny, style=label.style_label_right)
+    if not isSkyHighMode and not na(tpPoc1)
+        line.new(bar_index - 30, tpPoc1, bar_index, tpPoc1, color=color.new(color.orange, 20), style=line.style_dashed, width=1)
+        label.new(bar_index - 30, tpPoc1, "右侧目标-上方筹码阻力", color=color.new(color.orange, 80), textcolor=color.orange, size=size.tiny, style=label.style_label_right)
+
+plot(isLeft ? leftTp : na, title="左侧止盈目标", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=1)
+plot(isLeft ? leftT1 : na, title="左侧抄底目标1", color=color.new(color.aqua, 20), style=plot.style_circles, linewidth=1)
+plot(isLeft ? leftT2 : na, title="左侧抄底目标2", color=color.new(color.blue, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightBo : na, title="右侧突破开仓价", color=color.new(color.fuchsia, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightNextTp : na, title="右侧保守目标价", color=color.new(color.orange, 20), style=plot.style_circles, linewidth=1)
+plot(not isLeft ? rightSl : na, title="右侧防守止损价", color=color.new(color.red, 20), style=plot.style_circles, linewidth=1)
+
+// ====================================================================================================================}
+// 追加：用于在数据窗口(Data Window)实时显示的左侧风控数据
+// ===================================================================================================================={
+plot(isLeft ? leftSl1 : na, title="数据窗口-左侧止损1", color=color.new(color.red, 100), display=display.data_window)
+plot(isLeft ? leftSl2 : na, title="数据窗口-左侧止损2", color=color.new(color.red, 100), display=display.data_window)
+
+float dataWindowRr = na
+if isLeft and not na(leftT1) and not na(leftTp) and leftT1 > 0 and not na(leftSl1)
+    float reward = leftTp - leftT1
+    float risk = math.max(leftT1 - leftSl1, syminfo.mintick)
+    if risk > 0 and reward > 0
+        dataWindowRr := reward / risk
+
+plot(dataWindowRr, title="数据窗口-左侧盈亏比", color=color.new(color.yellow, 100), display=display.data_window)
+
+// ====================================================================================================================}
+// 核心：四维胜率算法模型
+// ===================================================================================================================={
+string scoreText = "--"
+color  scoreColor = color.gray
+
+if barstate.islast
+    float vR = safeGlobalAtr14 > 0 ? (nz(globalAtr, safeGlobalAtr14) / safeGlobalAtr14) : 1.0 
+    int totalScore = 0
+    
+    if isLeft and not na(leftPocObj)
+        float volRatio = leftPocObj.legVol > 0 ? (leftPocObj.pocVol / leftPocObj.legVol) : 0
+        int scoreF1 = volRatio > 0.25 ? 25 : (volRatio > 0.15 ? 15 : 5)
+        int scoreF2 = leftPocObj.pocDelta > 0 ? 25 : 5
+        int scoreF3 = 10
+        if na(currentAvwap)
+            scoreF3 := 15
+        else if math.abs(poc1 - currentAvwap) <= safeGlobalAtr14
+            scoreF3 := 30
+        else if poc1 > currentAvwap
+            scoreF3 := 20
+        else if currentAvwap > poc1 + 2 * safeGlobalAtr14
+            scoreF3 := 0
+        int scoreF4 = vR < 1.2 ? 20 : (vR < 1.5 ? 10 : 0)
+        
+        totalScore := scoreF1 + scoreF2 + scoreF3 + scoreF4
+        
+    else if not isLeft and not na(rightBo)
+        float currentVolRatio = ta.sma(safeVolume, 20) > 0 ? safeVolume / ta.sma(safeVolume, 20) : 1.0
+        int scoreF1 = currentVolRatio >= bubbleMult ? 30 : (currentVolRatio >= 1.2 ? 15 : 5)
+        int scoreF2 = na(currentAvwap) ? 10 : (close >= currentAvwap ? 25 : 5)
+        int scoreF3 = 15
+        if not na(rightSl) and rightBo > rightSl
+            float currentPlanRr = (rightNextTp - rightBo) / math.max(rightBo - rightSl, syminfo.mintick)
+            scoreF3 := currentPlanRr >= 2.0 ? 25 : (currentPlanRr >= 1.2 ? 15 : 0)
+        int scoreF4 = (vR >= 1.0 and vR <= 2.2) ? 20 : 10
+        
+        totalScore := scoreF1 + scoreF2 + scoreF3 + scoreF4
+
+    if totalScore > 0
+        if totalScore >= 80
+            scoreText := "高胜率 (" + str.tostring(totalScore) + "分 ★★★★☆)"
+            scoreColor := color.lime
+        else if totalScore >= 60
+            scoreText := "中等 (" + str.tostring(totalScore) + "分 ★★★☆☆)"
+            scoreColor := color.yellow
+        else if totalScore >= 40
+            scoreText := "一般 (" + str.tostring(totalScore) + "分 ★★☆☆☆)"
+            scoreColor := color.orange
+        else
+            scoreText := "高风险 (" + str.tostring(totalScore) + "分 ★☆☆☆☆)"
+            scoreColor := color.red
+
+var table targetTable = table.new(position.bottom_right, 5, 6, bgcolor=color.new(color.black, 40), border_color=color.new(color.gray, 60), border_width=1)
+
+if barstate.islast
+    if isLeft
+        table.cell(targetTable, 0, 0, "左侧阶梯抄底", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 0, "参考POC", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 0, "ATR倍数", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 0, "挂单目标", text_color=color.white, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 0, "风控止损", text_color=color.white, text_size=size.small, text_halign=text.align_right)
+        
+        if not na(leftTp)
+            table.cell(targetTable, 0, 1, tpLabelLeft, text_color=color.orange, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 1, str.tostring(tpPoc1, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 1, "-" + str.tostring(tpAtrMult, "#.#") + "x", text_color=color.orange, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 1, str.tostring(leftTp, format.mintick), text_color=color.orange, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 1, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 1, tpLabelLeft, text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 1, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 1, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 1, "--", text_color=color.rgb(254, 254, 255), text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 1, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        if not na(leftT1)
+            table.cell(targetTable, 0, 2, "目标 1 (近支撑)", text_color=color.aqua, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 2, str.tostring(poc1, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 2, "-" + str.tostring(targetAtrMult, "#.#") + "x", text_color=color.aqua, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 2, str.tostring(leftT1, format.mintick), text_color=color.aqua, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 2, str.tostring(leftSl1, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 2, "目标 1 (近支撑)", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 2, "--", text_color=color.rgb(254, 254, 255), text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        if not na(leftT2)
+            table.cell(targetTable, 0, 3, "目标 2 (深支撑)", text_color=color.blue, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 3, str.tostring(poc2, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 3, "-" + str.tostring(targetAtrMult, "#.#") + "x", text_color=color.blue, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 3, str.tostring(leftT2, format.mintick), text_color=color.blue, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 3, str.tostring(leftSl2, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 3, "目标 2 (深支撑)", text_color=color.rgb(252, 253, 255), text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 3, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 3, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 3, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 3, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        float leftProfit = na
+        string leftRrStr = "--"
+        if not na(leftT1) and not na(leftTp) and leftT1 > 0
+            leftProfit := ((leftTp - leftT1) / leftT1) * 100
+            if not na(leftSl1)
+                float reward = leftTp - leftT1
+                float risk = math.max(leftT1 - leftSl1, syminfo.mintick)
+                if risk > 0
+                    leftRrStr := reward > 0 ? "盈亏比 " + str.tostring(reward / risk, "#.##") + ":1" : "无盈亏比(倒挂)"
+
+        if not na(leftProfit)
+            table.cell(targetTable, 0, 4, "预期利润率", text_color=color.yellow, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 4, "T1抄底➔止盈", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 4, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 4, (leftProfit > 0 ? "+" : "") + str.tostring(leftProfit, "#.##") + "%", text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 4, leftRrStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 4, "预期利润率", text_color=color.gray, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 4, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 4, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 4, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 4, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        table.cell(targetTable, 0, 5, "多维胜率预测", text_color=scoreColor, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 5, "厚度/主力/趋势/情绪", text_color=scoreColor, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 5, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 5, "系统评级 ➔", text_color=scoreColor, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 5, not na(leftT1) ? scoreText : "--", text_color=scoreColor, text_size=size.small, text_halign=text.align_right)
+
+    else
+        table.cell(targetTable, 0, 0, "右侧趋势跟随", text_color=color.white, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 0, "参考基准", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 0, "ATR倍数", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 0, "执行价/状态", text_color=color.white, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 0, "止损价", text_color=color.white, text_size=size.small, text_halign=text.align_right)
+
+        if not na(rightBo)
+            table.cell(targetTable, 0, 1, "突破买入 (AVWAP)", text_color=color.fuchsia, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 1, str.tostring(currentAvwap, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 1, "+" + str.tostring(targetAtrMult, "#.#") + "x", text_color=color.fuchsia, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 1, str.tostring(rightBo, format.mintick), text_color=color.fuchsia, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 1, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 1, "突破买入 (AVWAP未生成)", text_color=color.fuchsia, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 1, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 1, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 1, "等待新量", text_color=color.fuchsia, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 1, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        if not na(rightSl)
+            table.cell(targetTable, 0, 2, "防守底线 (支撑/量柱)", text_color=color.red, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 2, str.tostring(structuralBaseSl, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 2, "-" + str.tostring(slAtrMult, "#.#") + "x", text_color=color.red, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 2, str.tostring(rightSl, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right)
+        else
+            table.cell(targetTable, 0, 2, "防守底线 (支撑/量柱)", text_color=color.gray, text_size=size.small, text_halign=text.align_left)
+            table.cell(targetTable, 1, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 2, "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 3, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+            table.cell(targetTable, 4, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        string trendState = na(currentAvwap) ? "--" : (close >= currentAvwap ? "多头趋势" : "空头趋势")
+        color trendColor = na(currentAvwap) ? color.gray : (close >= currentAvwap ? color.green : color.red)
+        table.cell(targetTable, 0, 3, "生命线 (AVWAP)", text_color=avwapC, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 3, not na(currentAvwap) ? str.tostring(currentAvwap, format.mintick) : "--", text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 3, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 3, trendState, text_color=trendColor, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 3, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
+
+        string rightRrStr = "--"
+        string nextTargetStr = "--"
+        if not na(rightBo) and not na(rightSl)
+            float risk = math.max(rightBo - rightSl, syminfo.mintick)
+            if not na(rightNextTp)
+                float reward = rightNextTp - rightBo
+                nextTargetStr := str.tostring(rightNextTp, format.mintick)
+                if risk > 0 and reward > 0
+                    rightRrStr := "一阶盈亏比 " + str.tostring(reward / risk, "#.##") + ":1"
+                else
+                    rightRrStr := "无盈亏比(倒挂)"
+            else
+                nextTargetStr := "无顶"
+                rightRrStr := "🚀 空间无限 (持仓)"
+                
+        table.cell(targetTable, 0, 4, "预期空间(下一阻力)", text_color=color.yellow, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 4, isSkyHighMode ? "新高无阻" : str.tostring(tpPoc1, format.mintick), text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 4, isSkyHighMode ? "+2.0x(追踪)" : "-" + str.tostring(tpAtrMult, "#.#") + "x", text_color=color.yellow, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 4, nextTargetStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 4, rightRrStr, text_color=color.yellow, text_size=size.small, text_halign=text.align_right)
+
+        table.cell(targetTable, 0, 5, "多维胜率预测", text_color=scoreColor, text_size=size.small, text_halign=text.align_left)
+        table.cell(targetTable, 1, 5, "厚度/套牢/共振/动能", text_color=scoreColor, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 2, 5, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_center)
+        table.cell(targetTable, 3, 5, "系统评级 ➔", text_color=scoreColor, text_size=size.small, text_halign=text.align_right)
+        table.cell(targetTable, 4, 5, not na(rightBo) ? scoreText : "--", text_color=scoreColor, text_size=size.small, text_halign=text.align_right)
+
+// ====================================================================================================================}
+// 警报系统 (兼顾左侧极限接针与右侧收线防闪烁)
+// ====================================================================================================================}
+bool crossLeftT1 = ta.crossunder(low, leftT1)
+bool crossLeftT2 = ta.crossunder(low, leftT2)
+bool crossLeftTp = ta.crossover(high, leftTp) 
+
+if crossLeftT1 and isLeft
+    alert("【左侧抄底】" + syminfo.ticker + " 已回调触及强支撑买入价: " + str.tostring(leftT1, format.mintick), alert.freq_once_per_bar)
+
+if crossLeftT2 and isLeft
+    alert("【左侧深跌】" + syminfo.ticker + " 已触底极限防守买入价: " + str.tostring(leftT2, format.mintick), alert.freq_once_per_bar)
+
+if crossLeftTp and isLeft
+    alert("【左侧止盈】" + syminfo.ticker + " 已向上触及阻力卖出区: " + str.tostring(leftTp, format.mintick), alert.freq_once_per_bar)
+
+bool isVolBreakout = safeVolume > ta.sma(safeVolume, 20) * 1.2
+bool crossRightBoConfirmed = ta.crossover(close, rightBo)[1] and isVolBreakout[1]
+bool crossRightSlConfirmed = ta.crossunder(close, rightSl)[1]
+
+if crossRightBoConfirmed and not isLeft
+    alert("【右侧放量突破确认】" + syminfo.ticker + " 价格已收盘强势突破 AVWAP 确认开仓价: " + str.tostring(rightBo[1], format.mintick), alert.freq_once_per_bar)
+
+if crossRightSlConfirmed and not isLeft
+    alert("【右侧破位止损确认】" + syminfo.ticker + " 向下收盘击穿多头核心防守线: " + str.tostring(rightSl[1], format.mintick), alert.freq_once_per_bar)
+
+// ====================================================================================================================}
+// 【执行清理与虚线剪裁机制】
+// ===================================================================================================================={
+if untestedPocs.size() > 0
+    for i = untestedPocs.size() - 1 to 0
+        UntestedPOC p = untestedPocs.get(i)
+        bool isTested = high >= p.price and low <= p.price
+        
+        if isTested
+            p.pocLine.set_x2(bar_index)
+            untestedPocs.remove(i)
+        else
+            p.pocLine.set_x2(bar_index)
+            
+    if untestedPocs.size() > 0
+        int bullCount = 0
+        int bearCount = 0
+        for i = untestedPocs.size() - 1 to 0
+            UntestedPOC p = untestedPocs.get(i)
+            if p.isBull
+                bullCount += 1
+                if bullCount > 10
+                    p.pocLine.set_x2(p.endBar)
+                    untestedPocs.remove(i)
+            else
+                bearCount += 1
+                if bearCount > 10
+                    p.pocLine.set_x2(p.endBar)
+                    untestedPocs.remove(i)
+
+//---------------------------------------------------------------------------------------------------------------------}
+// ==================== [最终图层：RSI & MFI 自适应主图云图与越界渲染 (防 na 兜底与透光优化)] ====================
+//---------------------------------------------------------------------------------------------------------------------{
+oscRsi = ta.rsi(close, rsiLen)
+
+tpRsiMfi = hlc3
+rawMf = tpRsiMfi * safeVolume
+posMf = tpRsiMfi > tpRsiMfi[1] ? rawMf : 0.0
+negMf = tpRsiMfi < tpRsiMfi[1] ? rawMf : 0.0
+sumPosMf = math.sum(posMf, mfiLen)
+sumNegMf = math.sum(negMf, mfiLen)
+safeNegMf = sumNegMf == 0 ? 0.000001 : sumNegMf
+oscMfi = 100 - (100 / (1 + (sumPosMf / safeNegMf)))
+
+rsiPctUpper = ta.percentile_linear_interpolation(oscRsi, pctLen, 80)
+rsiPctLower = ta.percentile_linear_interpolation(oscRsi, pctLen, 20)
+mfiPctUpper = ta.percentile_linear_interpolation(oscMfi, pctLen, 80)
+mfiPctLower = ta.percentile_linear_interpolation(oscMfi, pctLen, 20)
+
+// 稳定价格映射视窗：nz 保护防止历史初始柱 na 扩散
+float winHigh = nz(ta.highest(high, mapLookback), high)
+float winLow  = nz(ta.lowest(low, mapLookback), low)
+float winRange = math.max(winHigh - winLow, syminfo.mintick)
+
+f_toPrice(float val) =>
+    winLow + (val / 100.0) * winRange
+
+priceRsiUpper = f_toPrice(rsiPctUpper)
+priceRsiLower = f_toPrice(rsiPctLower)
+priceMfiUpper = f_toPrice(mfiPctUpper)
+priceMfiLower = f_toPrice(mfiPctLower)
+
+priceRsi = f_toPrice(oscRsi)
+priceMfi = f_toPrice(oscMfi)
+
+color dynamicRsiFill = na
+if showRsiCloud
+    if rsiPctUpper < 60
+        dynamicRsiFill := color.new(#00ffaa, 78) 
+    else if rsiPctLower > 50
+        dynamicRsiFill := color.new(#ff0055, 78) 
+    else
+        dynamicRsiFill := color.new(pctFillColor, pctFillTrans)
+
+color dynamicMfiFill = na
+if showMfiCloud
+    if mfiPctUpper < 60
+        dynamicMfiFill := color.new(#00ffaa, 78) 
+    else if mfiPctLower > 50
+        dynamicMfiFill := color.new(#ff0055, 78) 
+    else
+        dynamicMfiFill := color.new(mfiPctFillColor, mfiPctFillTrans)
+
+p_rsiUp = plot(showRsiCloud ? priceRsiUpper : na, title="RSI 自适应超买边界", color=color.new(pctColorUp, 35), linestyle=plot.linestyle_dashed)
+p_rsiDn = plot(showRsiCloud ? priceRsiLower : na, title="RSI 自适应超卖边界", color=color.new(pctColorDn, 35), linestyle=plot.linestyle_dashed)
+fill(p_rsiUp, p_rsiDn, color=dynamicRsiFill, title="RSI 自适应动态云图")
+
+p_mfiUp = plot(showMfiCloud ? priceMfiUpper : na, title="MFI 自适应超买边界", color=color.new(mfiPctColorUp, 35), linestyle=plot.linestyle_dotted)
+p_mfiDn = plot(showMfiCloud ? priceMfiLower : na, title="MFI 自适应超卖边界", color=color.new(mfiPctColorDn, 35), linestyle=plot.linestyle_dotted)
+fill(p_mfiUp, p_mfiDn, color=dynamicMfiFill, title="MFI 自适应动态云图")
+
+rsiMfiTopColor = (showCrossFill and showRsiCloud and showMfiCloud and rsiPctUpper > mfiPctUpper) ? color.new(#f30d0d, 58) : na
+fill(p_rsiUp, p_mfiUp, color=rsiMfiTopColor, title="RSI上沿破MFI(顶部超常)")
+
+rsiMfiBotColor = (showCrossFill and showRsiCloud and showMfiCloud and rsiPctLower < mfiPctLower) ? color.new(#00ff08, 58) : na
+fill(p_rsiDn, p_mfiDn, color=rsiMfiBotColor, title="RSI下沿破MFI(底部真空)")
+
+plot(showOscLines ? priceRsi : na, title="映射 RSI 原生线", color=color.new(#2962ff, 25), linewidth=1)
+plot(showOscLines ? priceMfi : na, title="映射 MFI 原生线", color=color.new(#ff9800, 25), linewidth=1)
