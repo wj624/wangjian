@@ -1,5 +1,5 @@
 //@version=6
-indicator("流动性压力指数", shorttitle="流动性压力58版_极速修复版", overlay=false)
+indicator("流动性压力指数", shorttitle="流动性压力59版", overlay=false)
 
 // === 1. 参数 & 阈值 ===
 group_lsi = "LSI (美元体系内部压力)"
@@ -371,7 +371,16 @@ if barstate.islast or barstate.isrealtime
         bg_desc += "LSI正常宽松"
     else
         bg_desc += "LSI平衡/中性"
-
+// --- 1. 大顶级宏观/动量状态 ---
+    if state_blackhole
+        bg_desc += "⭐【流动性黑洞】"
+    if state_stagflation
+        bg_desc += "⭐【滞胀式危机】"
+    if state_supernova
+        bg_desc += "⭐【流动性泛滥】"
+    if state_gold_regime
+        bg_desc += "⭐【范式转换】"
+ 
     // 【逻辑修复】改为追加拼接，修复以前因为 := 导致的文本被非法覆盖问题
     if is_liquidity_break
         bg_desc += " | ⚠核心流动性断裂"
