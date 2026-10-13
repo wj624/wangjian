@@ -713,7 +713,7 @@ else if isT2
         finalTColor := color.rgb(0, 213, 255)
 
 // 🌟 【顶置信号丝带】独立于背景渲染，在技术副图 98 高度拉出历史连续线
-plot(98, title="T0-T3 指挥官信号丝带", color=finalTColor, linewidth=4, style=plot.style_line)
+plot(98.5, title="T0-T3 指挥官信号丝带", color=finalTColor, linewidth=3, style=plot.style_line)
 
 
 // ==================== [ 第三阶段：图表渲染 ] ====================
@@ -973,15 +973,15 @@ if showAtrPanel and barstate.islast
         
         string tItems = ""
         if osc >= rsiOverbought
-            tItems := tItems + (tItems == "" ? "" : "+") + "RSI"
+            tItems := tItems + (tItems == "" ? "" : "+") + "RSI超买"
         if macdTurnDown and macdHist > 0
-            tItems := tItems + (tItems == "" ? "" : "+") + "MACD"
+            tItems := tItems + (tItems == "" ? "" : "+") + "MACD红柱缩短"
         if closeCci >= cciExtremeOB
-            tItems := tItems + (tItems == "" ? "" : "+") + "CCI"
+            tItems := tItems + (tItems == "" ? "" : "+") + "CCI极超买"
         if mfiVal >= 80
-            tItems := tItems + (tItems == "" ? "" : "+") + "MFI"
+            tItems := tItems + (tItems == "" ? "" : "+") + "MFI资金超买"
         if climaxCloudBear
-            tItems := tItems + (tItems == "" ? "" : "+") + "云图"
+            tItems := tItems + (tItems == "" ? "" : "+") + "双云图高位"
         resItems := tItems
 
     else if isBotRes
@@ -992,22 +992,21 @@ if showAtrPanel and barstate.islast
         
         string bItems = ""
         if osc <= rsiOversold
-            bItems := bItems + (bItems == "" ? "" : "+") + "RSI"
+            bItems := bItems + (bItems == "" ? "" : "+") + "RSI超卖"
         if macdTurnUp and macdHist < 0
-            bItems := bItems + (bItems == "" ? "" : "+") + "MACD"
+            bItems := bItems + (bItems == "" ? "" : "+") + "MACD绿柱缩短"
         if closeCci <= cciExtremeOS
-            bItems := bItems + (bItems == "" ? "" : "+") + "CCI"
+            bItems := bItems + (bItems == "" ? "" : "+") + "CCI极超跌"
         if mfiVal <= 20
-            bItems := bItems + (bItems == "" ? "" : "+") + "MFI"
+            bItems := bItems + (bItems == "" ? "" : "+") + "MFI资金冰点"
         if climaxCloudBull
-            bItems := bItems + (bItems == "" ? "" : "+") + "云图"
+            bItems := bItems + (bItems == "" ? "" : "+") + "双云图低位"
         resItems := bItems
 
     // 填入第 8 行单元格
     table.cell(atrTable, 0, 8, "极值共振状态", text_color=color.white, text_size=size.small, text_halign=text.align_left)
     table.cell(atrTable, 1, 8, resStatus, bgcolor=resBgCol, text_color=resTextCol, text_size=size.small, text_halign=text.align_center)
-    table.cell(atrTable, 2, 8, resItems, text_color=resTextCol, text_size=size.small, text_halign=text.align_right)
-
+    table.cell(atrTable, 2, 8, resItems, text_color=resTextCol, text_size=size.tiny, text_halign=text.align_right)
 // ==================== [ 后台 Data Window 输出 ] ====================
 backtest_atrStopDist = atr * atrMult
 backtest_priceMinusAtr = close - atr
