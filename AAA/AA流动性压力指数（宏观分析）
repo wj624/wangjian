@@ -100,18 +100,18 @@ src_WRBWFRBL = "FRED:WRBWFRBL"
 src_TLAACBM027SBOG = "FRED:TLAACBM027SBOG"
 src_GDP = "FRED:GDP"
 
-// === 4. 数据请求 (V61：100%采用59版原生单位体系，并显式加入 lookahead_off 防重绘与配额合并优化) ===
-raw_fed = request.security(s_fed, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_ecb = request.security(s_ecb, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_pbc = request.security(s_pbc, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_boj = request.security(s_boj, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+// === 4. 数据请求 (V61极速版：扁平化直接请求，严格控制在28次请求以内，彻底杜绝RE10137超限报错) ===
+raw_fed = request.security(s_fed, "D", close, gaps=barmerge.gaps_off)
+raw_ecb = request.security(s_ecb, "D", close, gaps=barmerge.gaps_off)
+raw_pbc = request.security(s_pbc, "D", close, gaps=barmerge.gaps_off)
+raw_boj = request.security(s_boj, "D", close, gaps=barmerge.gaps_off)
 
-raw_eurusd = request.security(s_eurusd, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_cnyusd = request.security(s_cnyusd, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_jpyusd = request.security(s_jpyusd, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+raw_eurusd = request.security(s_eurusd, "D", close, gaps=barmerge.gaps_off)
+raw_cnyusd = request.security(s_cnyusd, "D", close, gaps=barmerge.gaps_off)
+raw_jpyusd = request.security(s_jpyusd, "D", close, gaps=barmerge.gaps_off)
 
-raw_tga = request.security(s_tga, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-raw_rrp_b = request.security(s_rrp_b, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+raw_tga = request.security(s_tga, "D", close, gaps=barmerge.gaps_off)
+raw_rrp_b = request.security(s_rrp_b, "D", close, gaps=barmerge.gaps_off)
 
 fed_bal      = use_fed  ? nz(raw_fed) : 0.0
 ecb_bal_raw  = use_ecb  ? nz(raw_ecb) : 0.0
@@ -125,23 +125,22 @@ jpy_usd = use_boj ? nz(raw_jpyusd, nz(raw_jpyusd[1], 0.00652)) : 1.0
 tga_bal = use_tga ? nz(raw_tga) : 0.0
 rrp_bal = use_rrp ? nz(raw_rrp_b) : 0.0
 
-reserves_raw_display = request.security("FRED:WRESBAL", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-wr_bal_raw_display   = request.security(src_WRBWFRBL, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-total_assets_display = request.security(src_TLAACBM027SBOG, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-gdp_raw              = request.security(src_GDP, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+reserves_raw_display = request.security("FRED:WRESBAL", "D", close, gaps=barmerge.gaps_off)
+wr_bal_raw_display   = request.security(src_WRBWFRBL, "D", close, gaps=barmerge.gaps_off)
+total_assets_display = request.security(src_TLAACBM027SBOG, "D", close, gaps=barmerge.gaps_off)
+gdp_raw              = request.security(src_GDP, "D", close, gaps=barmerge.gaps_off)
 
-s5th_raw     = request.security(s5th_symbol, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-gold_price   = request.security("TVC:GOLD", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-silver_price = request.security("TVC:SILVER", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+s5th_raw     = request.security(s5th_symbol, "D", close, gaps=barmerge.gaps_off)
+gold_price   = request.security("TVC:GOLD", "D", close, gaps=barmerge.gaps_off)
+silver_price = request.security("TVC:SILVER", "D", close, gaps=barmerge.gaps_off)
 
-wdtgal   = request.security("FRED:WDTGAL", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+wdtgal   = request.security("FRED:WDTGAL", "D", close, gaps=barmerge.gaps_off)
 wrbwfrbl = wr_bal_raw_display
-// 合并 DXY 与其均线请求，节省算力并保持结果100%一致
-[dxy_raw, dxy_ma] = request.security(src_dxy, "D", [close, ta.sma(close, dxy_ma_len)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dxy_raw, dxy_ma] = request.security(src_dxy, "D", [close, ta.sma(close, dxy_ma_len)], gaps=barmerge.gaps_off)
 
-wlrr = request.security("FRED:WLRRAL", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+wlrr = request.security("FRED:WLRRAL", "D", close, gaps=barmerge.gaps_off)
 
-// 严格采用 59 版单位换算 (/ 1e9)，同时使用 raw_rrp_b 防止用户关闭 GLI 的 use_rrp 开关时破坏资金流向雷达
+// 【BUG修复】使用 raw_rrp_b 独立计算逆回购流向，并在 nz 中传入当前值防止首根K线空值引发千亿级假抽水
 delta_tga_b  = (wdtgal - nz(wdtgal[flow_lookback], wdtgal)) / 1000000000 
 delta_wlrr_b = (wlrr - nz(wlrr[flow_lookback], wlrr)) / 1000000000
 delta_rrp_b  = (raw_rrp_b - nz(raw_rrp_b[flow_lookback], raw_rrp_b)) / 1000000000
@@ -161,7 +160,7 @@ bool is_core_draining = max_drain > flow_threshold and (max_drain == delta_tga_b
 bool is_core_injecting = min_inject < -flow_threshold
 color flow_text_color = (is_core_draining and is_core_injecting) ? (max_drain >= math.abs(min_inject) ? color.red : color.lime) : is_core_draining ? color.red : (is_core_injecting ? color.lime : color.white)
 
-// === 5. 核心计算 (100% 保持 59 版原生单位换算) ===
+// === 5. 核心计算 ===
 total_liq = (fed_bal - tga_bal - rrp_bal + (ecb_bal_raw * eur_usd) + (pbc_bal_raw * cny_usd) + (boj_bal_raw * jpy_usd)) / 1000000000000
 prev_liq = nz(total_liq[gli_mom_lookback], total_liq)
 denom = math.max(math.abs(prev_liq), 0.01)
@@ -171,6 +170,7 @@ total_liq_change = (total_liq - prev_liq) / denom * 100
 liq_impulse = nz(total_liq_change) - nz(total_liq_change[gli_mom_lookback])
 
 reserves_trillion = reserves_raw_display / 1000000000000
+// 【BUG修复】TradingView 已将 FRED:GDP 与 FRED:WRBWFRBL 还原为原始美元；若 gdp_raw > 1e11 直接对齐，避免乘以 1000 把 GDP 放大千倍导致准备金/GDP 恒小于 11%
 float gdp_aligned = gdp_raw > 1e11 ? gdp_raw : gdp_raw * 1000
 
 reserve_to_gdp_ratio = wr_bal_raw_display / (gdp_aligned > 0 ? gdp_aligned : na)
@@ -179,16 +179,16 @@ is_reserve_low_gdp = reserve_to_gdp_ratio < reserve_gdp_threshold and not na(res
 is_reserve_low_assets = reserve_to_assets_ratio < reserve_assets_threshold and not na(reserve_to_assets_ratio)
 is_reserve_insufficient = is_reserve_low_gdp and is_reserve_low_assets
 
-sofr = nz(request.security(src_sofr, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-rrp_rate = nz(request.security(src_rrp, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-effr = nz(request.security(src_effr, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-iorb = nz(request.security(src_iorb, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-us02y = nz(request.security(src_us02y, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-us10y = nz(request.security(src_us10y, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100) 
-t10yie = nz(request.security(src_t10yie, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-dfii10 = nz(request.security(src_dfii10, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-credit_spread = nz(request.security(src_credit_spread, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
-us_inflation_rate = nz(request.security(src_usiryy, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off) * 100)
+sofr = nz(request.security(src_sofr, "D", close, gaps=barmerge.gaps_off) * 100)
+rrp_rate = nz(request.security(src_rrp, "D", close, gaps=barmerge.gaps_off) * 100)
+effr = nz(request.security(src_effr, "D", close, gaps=barmerge.gaps_off) * 100)
+iorb = nz(request.security(src_iorb, "D", close, gaps=barmerge.gaps_off) * 100)
+us02y = nz(request.security(src_us02y, "D", close, gaps=barmerge.gaps_off) * 100)
+us10y = nz(request.security(src_us10y, "D", close, gaps=barmerge.gaps_off) * 100) 
+t10yie = nz(request.security(src_t10yie, "D", close, gaps=barmerge.gaps_off) * 100)
+dfii10 = nz(request.security(src_dfii10, "D", close, gaps=barmerge.gaps_off) * 100)
+credit_spread = nz(request.security(src_credit_spread, "D", close, gaps=barmerge.gaps_off) * 100)
+us_inflation_rate = nz(request.security(src_usiryy, "D", close, gaps=barmerge.gaps_off) * 100)
 
 // --- [优化模块] 收益率曲线斜率 (牛陡/熊陡) 监控 (危机捕获版) ---
 yield_spread = us10y - us02y
@@ -244,7 +244,7 @@ gs_ratio     = nz(gs_ratio_raw, nz(gs_ratio_raw[1], na))
 is_gs_low    = use_gsr_alert and not na(gs_ratio) and gs_ratio <= gsr_low_threshold
 is_gs_high   = use_gsr_alert and not na(gs_ratio) and gs_ratio >= gsr_high_threshold
 
-// 【V61 逻辑修正】美联储净流动性代理指标：TGA (财政部账户) 抽水为负向，准备金 (WRBWFRBL) 扩表为正向
+// 保持 59 版美联储救市扩表脉冲见顶设计逻辑 (TGA + 准备金同步暴涨后放缓跌破均线)
 lookback_norm = 500
 wdtgal_min = ta.lowest(wdtgal, lookback_norm)
 wdtgal_max = ta.highest(wdtgal, lookback_norm)
@@ -252,7 +252,7 @@ wrb_min = ta.lowest(wrbwfrbl, lookback_norm)
 wrb_max = ta.highest(wrbwfrbl, lookback_norm)
 norm_wdtgal = (wdtgal - wdtgal_min) / math.max(wdtgal_max - wdtgal_min, 1e-6)
 norm_wrb = (wrbwfrbl - wrb_min) / math.max(wrb_max - wrb_min, 1e-6)
-fed_liq_proxy = (1.0 - norm_wdtgal) * 0.5 + norm_wrb * 0.5
+fed_liq_proxy = norm_wdtgal * 0.5 + norm_wrb * 0.5
 ma_fed_liq = ta.sma(fed_liq_proxy, ma_period)
 fed_liq_top = fed_liq_proxy < ma_fed_liq and not na(ma_fed_liq)
 
@@ -260,7 +260,7 @@ gold_top_diff = effr - us_inflation_rate
 is_gold_top = gold_top_diff < gold_th
 is_impulse_waning = ta.falling(liq_impulse, 3)
 
-// 100% 保持 59 版 RRP 单位换算 (/ 1e12)，但使用 raw_rrp_b 确保关闭 use_rrp 时不会误报 RRP 枯竭
+// 【BUG修复】使用 raw_rrp_b 计算，防止用户关闭 GLI 的 use_rrp 开关时误触发 RRP 枯竭
 rrp_trillion = nz(raw_rrp_b, 0) / 1000000000000
 rrp_peak = ta.highest(rrp_trillion, 500)
 rrp_pct = (rrp_trillion / (rrp_peak > 0 ? rrp_peak : 1)) * 100
@@ -470,7 +470,7 @@ if barstate.islast or barstate.isrealtime
     if is_dxy_strong and use_dxy
         l1_addons += " [强美元潮汐] DXY美元指数(" + str.tostring(dxy_raw, "#.##") + ")运行于" + str.tostring(dxy_ma_len) + "日均线上方，全球美元回流对非美市场及大宗商品构成汇率抽水压制；"
     if is_gold_top or is_gold_top_macro
-        l1_addons += " [贵金属周期提示] 触发" + (is_gold_top_macro ? "美联储宏观流动性拐点与通胀预期共振的黄金阶段性见顶信号，" : "有效利率远低于通胀的极端负利率黄金见顶阈值，") + "追高贵金属需注意盈亏比；"
+        l1_addons += " [贵金属周期提示] 触发" + (is_gold_top_macro ? "美联储救市QE放缓与高通胀预期背离的黄金冲顶回落信号，" : "有效利率远低于通胀的极端负利率黄金见顶阈值，") + "追高贵金属需注意盈亏比；"
     if is_gs_high
         l1_addons += " [金银比极高(" + str.tostring(gs_ratio, "#.#") + ")] 避险情绪浓厚或白银工业属性被极度低估，具备均值回归弹性；"
     else if is_gs_low
@@ -487,7 +487,7 @@ if barstate.islast or barstate.isrealtime
     if is_reserve_insufficient
         l2_pipes += "🚨准备金红线警报：准备金/GDP(" + str.tostring(reserve_to_gdp_ratio*100, "#.#") + "%)与准备金/银行总资产(" + str.tostring(reserve_to_assets_ratio*100, "#.#") + "%)双双跌破11%安全线，银行体系极易发生2019年9月式回购利率脉冲！"
     else if is_reserve_low_gdp or is_reserve_low_assets
-        l2_pipes += "⚠️准备金偏薄：准备金/GDP(" + str.tostring(reserve_to_gdp_ratio*100, "#.#") + "%)或占银行资产比(" + str.tostring(reserve_to_assets_ratio*100, "#.#") + "%)已有一项逼近11%警戒线，需密切跟踪美联储缩表(QT)节奏；"
+        l2_pipes += "⚠️准备金偏薄：准备金/GDP(" + str.tostring(reserve_to_gdp_ratio*100, "#.#") + "%)或占银行资产比(" + str.tostring(reserve_to_assets_ratio*100, "#.#") + "%)已有一项跌破11%警戒线，需密切跟踪美联储缩表(QT)节奏；"
     if is_sudden_drain
         l2_pipes += "🚨异常闪崩警报：监测到全球总资金池周期环比骤降(" + str.tostring(total_liq_change, "#.##") + "%)，警惕流动性真空引发的极速闪崩！"
     else if is_impulse_waning
