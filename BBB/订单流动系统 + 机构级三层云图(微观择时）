@@ -191,7 +191,7 @@ if isDownMove != isDownMove[1]
           "总成交量 | Total Volume: " + str.tostring(volumeBins.sum(), format.volume) 
          + "\n买入量 | Buy Volume: " + str.tostring(buyVolumeBins.sum(), format.volume) 
          + "\n卖出量 | Sell Volume: " + str.tostring(sellVolumeBins.sum(), format.volume) 
-         + "\n成交量差 | Delta Volume: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent) 
+         + "\n成交量差 | Delta Volume: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum(), format.percent) 
  
     label.new(prevSwingIndex, isDownMove ? swingTop : swingBottom, swingArrowText, 
          style = isDownMove ? label.style_label_down : label.style_label_up, 
@@ -295,7 +295,7 @@ if not isDownMove
               "T: " + str.tostring(volumeBins.sum(), format.volume) 
              + "\nB: " + str.tostring(buyVolumeBins.sum(), format.volume) 
              + "\nS: " + str.tostring(sellVolumeBins.sum(), format.volume) 
-             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent) 
+             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum(), format.percent) 
  
         dataLabel := label.new(prevSwingIndex, not isDownMove ? swingTop : swingBottom, swingDataText, 
              style = not isDownMove ? label.style_label_down : label.style_label_up, 
@@ -396,7 +396,7 @@ else
               "T: " + str.tostring(volumeBins.sum(), format.volume) 
              + "\nB: " + str.tostring(buyVolumeBins.sum(), format.volume) 
              + "\nS: " + str.tostring(sellVolumeBins.sum(), format.volume) 
-             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum() * 100, format.percent) 
+             + "\nD: " + str.tostring((buyVolumeBins.sum() - sellVolumeBins.sum()) / volumeBins.sum(), format.percent) 
  
         dataLabel := label.new(prevSwingIndex, not isDownMove ? swingTop : swingBottom, swingDataText, 
              style = not isDownMove ? label.style_label_down : label.style_label_up, 

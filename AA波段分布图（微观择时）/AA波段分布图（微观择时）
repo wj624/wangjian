@@ -655,7 +655,7 @@ if barstate.islast
         if not na(rightSl)
             table.cell(targetTable, 0, 2, "防守底线 (支撑/量柱)", text_color=color.red, text_size=size.small, text_halign=text.align_left)
             table.cell(targetTable, 1, 2, str.tostring(structuralBaseSl, format.mintick), text_color=color.rgb(255, 255, 255), text_size=size.small, text_halign=text.align_center)
-            table.cell(targetTable, 2, 2, "-" + str.tostring(slAtrMult, "#.#") + "x", text_color=color.red, text_size=size.small, text_halign=text.align_center)
+            table.cell(targetTable, 2, 2, "-" + str.tostring(safeSlAtrMult, "#.#") + "x", text_color=color.red, text_size=size.small, text_halign=text.align_center)
             table.cell(targetTable, 3, 2, "--", text_color=color.gray, text_size=size.small, text_halign=text.align_right)
             table.cell(targetTable, 4, 2, str.tostring(rightSl, format.mintick), text_color=color.red, text_size=size.small, text_halign=text.align_right)
         else

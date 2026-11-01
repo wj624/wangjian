@@ -336,7 +336,7 @@ float safeSlAtrMult = math.max(slAtrMult, targetAtrMult + syminfo.mintick / math
 2. **`request.security_lower_tf` 历史深度有限**：图表左侧很老区间取不到 LTF 数据，脚本会退化为「用当前 K 线本身当唯一一根 LTF bar」，POC 精度大幅下降。
 3. **日线 + 1 分钟组合风险极高**：加密货币一天 1440 根、美股约 390 根，极可能触发 Pine 的 intrabar 数据量上限，导致数据被截断。**日线请用 15 或 30 分钟**。
 4. **零成交量被替换为 1.0**：会产生极小量纲的虚假筹码与 MFI 资金流，通常可忽略，但在极端流动性枯竭品种上需注意。
-5. **看板止损显示与真实计算可能不一致**：看板文字显示的是用户填写的 `slAtrMult`，而实际计算用的是 `safeSlAtrMult = max(slAtrMult, targetAtrMult + mintick/ATR14)`。若你把 `slAtrMult` 设得比 `targetAtrMult` 还小，两者会不一致——**请始终保持 `slAtrMult > targetAtrMult`**。
+5. ~~看板止损显示与真实计算可能不一致~~ **【已修复 · 2026-11-01】**：旧版看板（右侧「防守底线」行的 ATR 倍数栏）显示的是用户输入的 `slAtrMult`，而实际 `rightSl` 计算用的是 `safeSlAtrMult = max(slAtrMult, targetAtrMult + mintick/ATR14)`。当用户把 `slAtrMult` 设得比 `targetAtrMult` 还小时，触发钳制，显示值与实际计算不一致，会误导风控距离判断。**现已将该栏改为显示实际生效的 `safeSlAtrMult`，与 `rightSl` 计算完全同源。** 仍建议保持 `slAtrMult > targetAtrMult`，以从输入层面避免钳制。
 6. **未测试 POC 数组有清理上限**：多头/空头各保留 10 条，超出后按 `endBar` 裁断，极老的 POC 会停止延伸。
 7. **`historicalPocs` 只 shift 不删线**：`shift()` 丢弃引用但 `line` 对象未删除，长期运行会持续消耗 `max_lines_count=500` 配额。
 8. **无 `alertcondition`**：只能通过「任何 alert() 函数调用」方式建警报（见上文）。
