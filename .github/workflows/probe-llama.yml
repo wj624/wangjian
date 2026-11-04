@@ -8,23 +8,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Probe /chat
-        run: |
-          B="https://llama-chat-worker.wj4020410.workers.dev"
-          echo "===== GET / full ====="
-          curl -sS -m 20 "$B/" | head -c 3500
-          echo ""
-          echo "===== POST /chat prompt (short) ====="
-          curl -sS -m 40 -i -X POST "$B/chat" \
-            -H "Content-Type: application/json" \
-            --data-binary @- <<'JSON' | head -c 2500
-{"prompt":"Reply in one short sentence: what is 1+1?"}
-JSON
-          echo ""
-          echo "===== POST /chat prompt (Chinese, 300 chars request) ====="
-          curl -sS -m 40 -X POST "$B/chat" \
-            -H "Content-Type: application/json" \
-            --data-binary @- <<'JSON' | head -c 2500
-{"prompt":"请用约300字总结以下要点，只输出总结正文：沪深300今日4008点，创业板2391点，宏观LSI 18bp处于正常区间，ETF近5日净申购165亿份。"}
-JSON
-          echo ""
+      - uses: actions/checkout@v4
+      - name: Run probe script
+        run: python3 probe_llama.py
