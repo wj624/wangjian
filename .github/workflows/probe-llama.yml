@@ -1,0 +1,32 @@
+name: probe llama worker
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe endpoints
+        run: |
+          B="https://llama-chat-worker.wj4020410.workers.dev"
+          try() {
+            name="$1"; path="$2"; body="$3"
+            echo "===== $name ====="
+            if [ -z "$body" ]; then
+              curl -sS -m 20 -i "$B$path" | head -c 600
+            else
+              curl -sS -m 25 -i -X POST "$B$path" \
+                -H "Content-Type: application/json" \
+                -d "$body" | head -c 900
+            fi
+            echo ""
+          }
+          try "GET /" "/" ""
+          try "GET /health" "/health" ""
+          try "POST / messages" "/" '{"messages":[{"role":"user","content":"用一句话回答：1+1等于几？"}]}'
+          try "POST / prompt" "/" '{"prompt":"用一句话回答：1+1等于几？"}'
+          try "POST /api/chat messages" "/api/chat" '{"messages":[{"role":"user","content":"用一句话回答：1+1等于几？"}]}'
+          try "POST /chat messages" "/chat" '{"messages":[{"role":"user","content":"用一句话回答：1+1等于几？"}]}'
+          try "POST /v1/chat/completions" "/v1/chat/completions" '{"model":"@cf/meta/llama-3.1-8b-instruct","messages":[{"role":"user","content":"用一句话回答：1+1等于几？"}],"max_tokens":60}'
