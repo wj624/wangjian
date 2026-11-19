@@ -1,6 +1,13 @@
 //@version=6
-indicator("流动性压力指数", shorttitle="流动性压力82版", overlay=false)
+indicator("流动性压力指数", shorttitle="流动性压力83版", overlay=false)
 
+// === 【V83】资金去向行改为"文字方向"制，符号彻底退出该行（判定口径/阈值/颜色/板块结构零改动，只改文案）：
+//   起因：V82 在括号末尾加"(正=抽水负=放水)"，本意只解释括号内三个渠道值，但该注释紧贴"净放水30.98B"，
+//         读者无法判断它是否也约束前面的方向词，反而增加歧义；同行还有准备金(正=减少)、残差(负=多抽)两套反向口径。
+//   P1: 看板行3——三渠道逐项改为"TGA抽33B / RRP放0.1B / 外回购抽2.2B"，每项自带文字方向，删除括号与口径注释。
+//   P2: 净抽水/净放水/未达阈值 全部只显示绝对值 + 方向词，未达阈值时写"三渠道平衡,净抽x.xB(未达阈值)"。
+//   P3: 残差文字按成因二分支："账外多抽"(三渠道为抽水方向) / "放水未落地"(三渠道为放水方向) / "反向释放"(残差为正)。
+//   P4: 资产端Δ 改"资产端扩表/缩表/持平 + 绝对值"，并修掉"资产端缩表却标[持平]"的标签矛盾(缩表未覆盖残差时标[缩表])。
 // === 【V82】修正资金去向的符号显示与方向归因（阈值/颜色/板块结构零改动，只改文案 + 一处归因量的算法）：
 //   P1: 看板行3——"净抽水/净放水"后不再贴带符号数值(此前负放水会显示成"净放水-30.8B"，双重否定)，改为只显示绝对值；
 //       三渠道括号末尾加注"正=抽水负=放水"，省掉每次对 ± 的口径猜测。净变动(未达阈值)仍保留符号。
@@ -592,6 +599,15 @@ bool  v71_qt_hit    = v71_asset_ok and v62_ident_broken and v62_ident_resid < 0 
 f_sign_b(float v) =>
     (v >= 0 ? "+" : "") + str.tostring(v, "#.#")
 
+// 【V83】三渠道单行文本：正=抽水、负=放水，一律显式写字，避免读者对 ± 做二次翻译
+f_supply_item(string _n, float _v) =>
+    float _a = math.abs(_v)
+    _a < 0.5 ? _n + "持平" : _n + (_v > 0 ? "抽" : "放") + str.tostring(_a, "#.#") + "B"
+
+// 【V83】残差方向按成因直接落文字，不再用"负=账外多抽/放水未落地"这种一对二注释
+f_resid_txt(float _r, float _nd) =>
+    _r < 0 ? (_nd < 0 ? "放水未落地" : "账外多抽") : "反向释放"
+
 // 【V80 A】v62_demand_str / v62_supply_str 已移入末尾渲染块(仅末根 bar 构建)
 //   原实现位于全局作用域，每根 bar 都要跑一遍分支与拼接，而结果只被末根 bar 的看板使用。
 
@@ -841,10 +857,12 @@ if barstate.islast or barstate.isrealtime
     else if v62_net_drain < -v62_net_drain_th
         v62_supply_str := "净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B"
     else
-        v62_supply_str := "净变动" + f_sign_b(v62_net_drain) + "B"
+        // 【V83】未达阈值不再贴 ±，方向词降级为"平衡+微抽/微放"
+        v62_supply_str := "三渠道平衡,净" + (v62_net_drain >= 0 ? "抽" : "放") + str.tostring(math.abs(v62_net_drain), "#.#") + "B(未达阈值)"
     if use_v62
-        // 【V82】括号内是纯数值区，末尾显式标注正负口径，避免把 + 误读成抽水方向之外的含义
-        v62_supply_str := v62_supply_str + "(TGA" + f_sign_b(v62_tga_chg) + "/RRP" + f_sign_b(v62_rrp_chg) + "/外回购" + f_sign_b(v62_cash_chg) + "，正=抽水负=放水)"
+        // 【V83】删除括号与"(正=抽水负=放水)"注释：该注释夹在括号内、又紧邻方向词，读者无法判断其作用范围；
+        //   改为每项自带文字方向，符号不再承担方向语义
+        v62_supply_str := v62_supply_str + " ｜" + f_supply_item("TGA", v62_tga_chg) + " " + f_supply_item("RRP", v62_rrp_chg) + " " + f_supply_item("外回购", v62_cash_chg)
         // 【V82】原为"准备金Δ" + 反向符号(正→"-")，与同行净抽水方向相反，极易被读成符号错误；改文字方向
         v62_supply_str := v62_supply_str + " 准备金" + (v62_res_chg >= 0 ? "减" : "增") + str.tostring(math.abs(v62_res_chg), "#.#") + "B"
         if v62_rrp_back
@@ -854,10 +872,13 @@ if barstate.islast or barstate.isrealtime
         else if v62_tga_only
             v62_supply_str := v62_supply_str + " [TGA单边抽水]"
         if v62_ident_broken
-            v62_supply_str := v62_supply_str + " ⚠残差" + f_sign_b(v62_ident_resid) + "B(负=账外多抽/放水未落地)"
-        // 【V71】资产端Δ 常驻显示(正=扩表/负=缩表)，缩表命中时打标，避免残差被误归其他负债项
+            // 【V83】残差改按成因写字，正负号与一对二注释一并去掉
+            v62_supply_str := v62_supply_str + " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + str.tostring(math.abs(v62_ident_resid), "#.#") + "B"
+        // 【V71】资产端Δ 常驻显示，缩表命中时打标，避免残差被误归其他负债项
+        // 【V83】改文字方向；并修正标签：缩表达阈值但未覆盖残差时原标[持平]，与"缩表"文字冲突，改为[缩表]
         if v71_asset_ok
-            v62_supply_str := v62_supply_str + " ｜资产端Δ" + f_sign_b(v71_asset_chg) + "B" + (v71_qt_hit ? "[缩表抽水]" : v71_asset_chg > v71_asset_th ? "[扩表]" : "[持平]")
+            string v83_asset_txt = (v71_qt_hit or v71_asset_chg > v71_asset_th or v71_asset_chg < -v71_asset_th) ? ((v71_asset_chg > 0 ? "资产端扩表" : "资产端缩表") + str.tostring(math.abs(v71_asset_chg), "#.#") + "B") : "资产端持平"
+            v62_supply_str := v62_supply_str + " ｜" + v83_asset_txt + (v71_qt_hit ? "[缩表抽水]" : v71_asset_chg > v71_asset_th ? "[扩表]" : v71_asset_chg < -v71_asset_th ? "[缩表]" : "")
 
     // --- A-5 V67 残差归因层 / 综合串 ---
     // ③ 残差项细分：负 = 有第四渠道在抽（缩表 / 其他负债项扩张 / 序列滞后）；正 = 有其他项反向释放对冲
@@ -988,7 +1009,7 @@ if barstate.islast or barstate.isrealtime
     // 且超容忍时又追加一整句 Fed 负债项解释。现将原始数值统一留在看板行3(数据区)，
     // AI 段只保留"谁在抽、抽了多少、口径是否闭合"三层结论，不复述明细、不重复归因。
     // 【V82】净放水后不再贴带符号数值(此前出现"净放水-30.8B")；并区分"放水落地"与"账面放水未落地"两种相反成因
-    string flow_v66 = "🩸【资金去向】买方: " + v62_demand_str + "；" + (v62_net_drain_on ? "卖方三渠道净抽水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，基础货币池被真实压缩，短端资金价格易上行。" : v62_net_drain < -v62_net_drain_th ? "卖方三渠道净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，" + (v62_ident_resid < 0 and v62_tga_chg < 0 ? "但准备金未增反降，财政投放被Fed其他负债项吸收，注入未真正落地银行体系。" : "短端资金面获得真实注入。") : "卖方三渠道净变动" + f_sign_b(v62_net_drain) + "B，未达抽放水阈值，由存量资金博弈主导。") + (v62_tga_offset ? "TGA 增量由 RRP 搬家承接，非真实抽水。" : "") + (v62_ident_broken ? " ⚠残差" + f_sign_b(v62_ident_resid) + "B 超容忍，" + (v71_qt_hit ? "已核实由资产端缩表(WALCL)造成，三渠道口径本身有效。" : "三渠道口径不闭合，归因见看板。") : " 残差在容忍内，三渠道口径闭合。")
+    string flow_v66 = "🩸【资金去向】买方: " + v62_demand_str + "；" + (v62_net_drain_on ? "卖方三渠道净抽水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，基础货币池被真实压缩，短端资金价格易上行。" : v62_net_drain < -v62_net_drain_th ? "卖方三渠道净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，" + (v62_ident_resid < 0 and v62_tga_chg < 0 ? "但准备金未增反降，财政投放被Fed其他负债项吸收，注入未真正落地银行体系。" : "短端资金面获得真实注入。") : "卖方三渠道基本平衡，" + (v62_net_drain >= 0 ? "净抽" : "净放") + str.tostring(math.abs(v62_net_drain), "#.#") + "B，未达抽放水阈值，由存量资金博弈主导。") + (v62_tga_offset ? "TGA 增量由 RRP 搬家承接，非真实抽水。" : "") + (v62_ident_broken ? " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + str.tostring(math.abs(v62_ident_resid), "#.#") + "B 超容忍，" + (v71_qt_hit ? "已核实由资产端缩表(WALCL)造成，三渠道口径本身有效。" : "三渠道口径不闭合，归因见看板。") : " 残差在容忍内，三渠道口径闭合。")
     string flow_analysis_raw = use_v62 ? flow_v66 : flow_legacy
 
     // 1. 一阶宏观周期与债务周期（主周期定性 + 实际利率/通胀偏差/强美元/贵金属周期叠加）
