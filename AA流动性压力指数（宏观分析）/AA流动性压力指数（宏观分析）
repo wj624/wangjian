@@ -1,5 +1,13 @@
 //@version=6
-indicator("流动性压力指数", shorttitle="流动性压力83版", overlay=false)
+indicator("流动性压力指数", shorttitle="流动性压力84版", overlay=false)
+
+// === 【V84】三批整合（显示层 / 结构 / 健壮性），判定口径与阈值零改动：
+//   批次1 显示层：资金量统一"千亿/亿"（f_amt，替换全部 B 后缀）、看板标签去 emoji（🩸）、
+//          数字对齐精度统一、源失联格显式 N/A。
+//   批次2 结构：看板视图模式（极简/标准，压行不减信息源）、remark 表头 tooltip（阈值不进正文）、
+//          f_wrap_w 触顶截断加"…"（替代旧版把余文全塞末行导致横向拉爆）。
+//   批次3 健壮/性能：非日线防呆提示、核心源失联门(src_core_ok)、换行结果按 key 缓存(同 tick 文本不变不重算)、
+//          行4 底色按严重度分档（黑天鹅/告警/常态）。
 
 // === 【V83】资金去向行改为"文字方向"制，符号彻底退出该行（判定口径/阈值/颜色/板块结构零改动，只改文案）：
 //   起因：V82 在括号末尾加"(正=抽水负=放水)"，本意只解释括号内三个渠道值，但该注释紧贴"净放水30.98B"，
@@ -121,6 +129,8 @@ bg_show_breakeven   = input.bool(false, "显示 通胀预期偏差大 背景色"
 
 // 【V75】RRP 枯竭是否计入行4 告警色：默认关闭(结构性背景长期为真，会让告警色失去区分度)
 v75_rrp_alert = input.bool(false, "RRP枯竭计入宏观状态告警色", group=group_ui, tooltip="关闭时 RRP 枯竭仍会在行0 的 RRP 格标红显示，不丢信息")
+// 【V84】看板视图模式：极简只压掉 AI 长文与归因层（信息源全部保留，随时切回），不删任何判定
+v84_view = input.string("标准", "看板视图模式", options=["标准", "极简"], group=group_ui, tooltip="极简=隐藏行5 AI 四维分析、行3 残差归因，仅保留行0-4 水位与告警，纵向最矮；标准=全量") 
 
 group_flow = "V57 资金流向雷达设置"
 flow_lookback = input.int(10, "流向计算周期 (天)", group=group_flow)
@@ -599,10 +609,21 @@ bool  v71_qt_hit    = v71_asset_ok and v62_ident_broken and v62_ident_resid < 0 
 f_sign_b(float v) =>
     (v >= 0 ? "+" : "") + str.tostring(v, "#.#")
 
+// 【V84 B1】资金量统一显示口径：输入十亿(B)，输出"千亿/亿"。
+//   起因：T 口径下 0.002T 与 0 无法区分；B 口径下小额读作 0.1B 不利于快速判断量级。
+//   规则：|值| >= 100B(即 1000亿) 用"千亿"(保留1位)，否则用"亿"(保留1位)。只改显示，不改任何数值计算。
+f_amt(float _v) =>
+    float _a = math.abs(_v)
+    string _sg = _v < 0 ? "-" : ""
+    _a >= 100.0 ? _sg + str.tostring(_a / 10.0, "#.#") + "千亿" : _sg + str.tostring(_a * 10.0, "#.#") + "亿"
+
+f_amt_abs(float _v) =>
+    f_amt(math.abs(_v))
+
 // 【V83】三渠道单行文本：正=抽水、负=放水，一律显式写字，避免读者对 ± 做二次翻译
 f_supply_item(string _n, float _v) =>
     float _a = math.abs(_v)
-    _a < 0.5 ? _n + "持平" : _n + (_v > 0 ? "抽" : "放") + str.tostring(_a, "#.#") + "B"
+    _a < 0.5 ? _n + "持平" : _n + (_v > 0 ? "抽" : "放") + f_amt(_a)
 
 // 【V83】残差方向按成因直接落文字，不再用"负=账外多抽/放水未落地"这种一对二注释
 f_resid_txt(float _r, float _nd) =>
@@ -755,6 +776,26 @@ f_wrap_legacy(txt, max_chars) =>
             result += str.substring(txt, pos, total)
     result
 
+// 【V84 B3】触顶截断：行数硬上限用尽时的兜底，按视觉列截到 max_cols-1 并补"…"
+//   旧版把余下全文一次性塞进末行，文本越界横向拉爆整个表格。
+f_clip(txt, max_cols) =>
+    int total = str.length(txt)
+    int mc = max_cols > 8 ? max_cols - 1 : max_cols
+    string ascii_set = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+    string out = ""
+    int i = 0
+    int w = 0
+    while i < total and w < mc
+        string ch = str.substring(txt, i, i + 1)
+        int cw = str.contains(ascii_set, ch) ? 1 : 2
+        if w + cw > mc
+            w := mc
+        else
+            out := out + ch
+            w := w + cw
+            i := i + 1
+    out + (i >= total ? "" : "…")
+
 // V72 宽度感知换行：ASCII 可打印字符计 1 列，中文/全角/emoji 计 2 列
 f_wrap_w(txt, max_cols) =>
     int total = str.length(txt)
@@ -795,7 +836,7 @@ f_wrap_w(txt, max_cols) =>
             lines := lines + 1
         // 【V81 FIX-P3】行数硬上限触发时, 余下全文并入末行, 绝不静默丢弃尾部文本
         if pos < total
-            res := res + str.substring(txt, pos, total)
+            res := res + f_clip(str.substring(txt, pos, total), mc)
             pos := total
     res
 
@@ -809,12 +850,24 @@ f_auto_wrap(txt, max_cols) =>
 // 【V75 修复 P1-2.4】f_auto_wrap 是 O(n^2) 字符循环，原实现放在全局作用域 → 每根 bar 都跑一遍，
 //   而最终只用于 barstate.islast 的 table.cell。现移入渲染块内，与 final_text / ai_judgment 口径一致。
 
+// 【V84 B3】换行结果缓存：isrealtime 下每 tick 都会跑一次 f_wrap_w(O(n^2) 字符循环)，
+//   而文本/宽度/开关三者不变时结果必然相同。用 key 比对跳过重算，key 含宽度与宽度感知开关，防止改参数后不刷新。
+var string v84_k_flow = ""
+var string v84_v_flow = ""
+var string v84_k_state = ""
+var string v84_v_state = ""
+var string v84_k_ai = ""
+var string v84_v_ai = ""
+
 var table us_table = table.new(position.top_right, 8, 6, bgcolor=color.new(color.black, 15), border_width=1, border_color=color.new(#5f6368, 50))
 
 if barstate.islast or barstate.isrealtime
     // ===== 【V80 性能优化 A】纯渲染字符串全部收敛到本块(仅末根 bar 执行) =====
     //   A 方案：以下字符串只服务于 table.cell / f_auto_wrap，历史 bar 上每根构建一次纯属浪费(约 25 次 str.tostring + 60+ 次拼接)。
     //   现统一改为渲染块内 string 并在此赋值(V81 去掉多余 var：每 tick 必重算，无需跨 bar 保留)；判定口径、格式、阈值一行未改，只改变计算发生的时机。
+
+    // --- 【V84 B3】核心源失联门：任一主源取不到值时不再走 nz→0 出假水位/假抽放水 ---
+    bool src_core_ok = not na(raw_fed) and not na(raw_tga) and not na(raw_rrp_b)
 
     // --- A-1 RRP 余额显示串(V79 FIX-5 单位自适应口径原样保留) ---
     string rrp_bal_txt = rrp_data_ok ? (nz(rrp_100b) >= 1.0 ? str.tostring(rrp_100b, "#.##") + "千亿" : str.tostring(nz(rrp_100b) * 1000.0, "#.##") + "亿") : ""
@@ -827,7 +880,7 @@ if barstate.islast or barstate.isrealtime
     // 曲线/斜率预警压缩串: 原独立"利差/曲线/斜率预警"行压缩进第2行, 用两行文本保留完整预警文案(不再只显示"牛陡/熊陡"符号)
     string curve_warn_text = is_bull_steepener ? "⚠衰退/流动性枯竭前兆" : is_bear_steepener ? "⚠长端通胀/结构杀估值" : "无极端结构异动"
     // V66: 移除独立的 10Y-2Y 显示格, 把利差数值直接并入本串, 省出一格宽度让预警文案单行完整显示
-    string curve_status_compact = curve_status_text + " " + str.tostring(yield_spread, "#.#") + "BP ｜ " + curve_warn_text
+    string curve_status_compact = curve_status_text + " " + f_amt(yield_spread) + "P ｜ " + curve_warn_text
 
     // --- A-4 买方侧(谁在接短债) / 卖方侧(钱被谁抽走) ---
     // ---- 买方侧: 谁在接短债 ----
@@ -853,18 +906,18 @@ if barstate.islast or barstate.isrealtime
     if not use_v62
         v62_supply_str := ""
     else if v62_net_drain_on
-        v62_supply_str := "净抽水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B"
+        v62_supply_str := "净抽水" + f_amt_abs(v62_net_drain)
     else if v62_net_drain < -v62_net_drain_th
-        v62_supply_str := "净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B"
+        v62_supply_str := "净放水" + f_amt_abs(v62_net_drain)
     else
         // 【V83】未达阈值不再贴 ±，方向词降级为"平衡+微抽/微放"
-        v62_supply_str := "三渠道平衡,净" + (v62_net_drain >= 0 ? "抽" : "放") + str.tostring(math.abs(v62_net_drain), "#.#") + "B(未达阈值)"
+        v62_supply_str := "三渠道平衡,净" + (v62_net_drain >= 0 ? "抽" : "放") + f_amt_abs(v62_net_drain) + "(未达阈值)"
     if use_v62
         // 【V83】删除括号与"(正=抽水负=放水)"注释：该注释夹在括号内、又紧邻方向词，读者无法判断其作用范围；
         //   改为每项自带文字方向，符号不再承担方向语义
         v62_supply_str := v62_supply_str + " ｜" + f_supply_item("TGA", v62_tga_chg) + " " + f_supply_item("RRP", v62_rrp_chg) + " " + f_supply_item("外回购", v62_cash_chg)
         // 【V82】原为"准备金Δ" + 反向符号(正→"-")，与同行净抽水方向相反，极易被读成符号错误；改文字方向
-        v62_supply_str := v62_supply_str + " 准备金" + (v62_res_chg >= 0 ? "减" : "增") + str.tostring(math.abs(v62_res_chg), "#.#") + "B"
+        v62_supply_str := v62_supply_str + " 准备金" + (v62_res_chg >= 0 ? "减" : "增") + f_amt_abs(v62_res_chg)
         if v62_rrp_back
             v62_supply_str := v62_supply_str + " [RRP回填]"
         if v62_tga_offset
@@ -873,17 +926,17 @@ if barstate.islast or barstate.isrealtime
             v62_supply_str := v62_supply_str + " [TGA单边抽水]"
         if v62_ident_broken
             // 【V83】残差改按成因写字，正负号与一对二注释一并去掉
-            v62_supply_str := v62_supply_str + " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + str.tostring(math.abs(v62_ident_resid), "#.#") + "B"
+            v62_supply_str := v62_supply_str + " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + f_amt_abs(v62_ident_resid)
         // 【V71】资产端Δ 常驻显示，缩表命中时打标，避免残差被误归其他负债项
         // 【V83】改文字方向；并修正标签：缩表达阈值但未覆盖残差时原标[持平]，与"缩表"文字冲突，改为[缩表]
         if v71_asset_ok
-            string v83_asset_txt = (v71_qt_hit or v71_asset_chg > v71_asset_th or v71_asset_chg < -v71_asset_th) ? ((v71_asset_chg > 0 ? "资产端扩表" : "资产端缩表") + str.tostring(math.abs(v71_asset_chg), "#.#") + "B") : "资产端持平"
+            string v83_asset_txt = (v71_qt_hit or v71_asset_chg > v71_asset_th or v71_asset_chg < -v71_asset_th) ? ((v71_asset_chg > 0 ? "资产端扩表" : "资产端缩表") + f_amt_abs(v71_asset_chg)) : "资产端持平"
             v62_supply_str := v62_supply_str + " ｜" + v83_asset_txt + (v71_qt_hit ? "[缩表抽水]" : v71_asset_chg > v71_asset_th ? "[扩表]" : v71_asset_chg < -v71_asset_th ? "[缩表]" : "")
 
     // --- A-5 V67 残差归因层 / 综合串 ---
     // ③ 残差项细分：负 = 有第四渠道在抽（缩表 / 其他负债项扩张 / 序列滞后）；正 = 有其他项反向释放对冲
     // 【V71】资产端状态附注：只在"未命中缩表"的残差分支尾部追加，用来证明缩表已被排除，而不是漏查
-    string v71_asset_note = not v71_asset_ok ? "" : (v71_asset_chg < -v71_asset_th ? "；资产端同期收缩" + str.tostring(math.abs(v71_asset_chg), "#.#") + "B，但覆盖不了残差，剩余仍归其他负债项" : (v71_asset_chg > v71_asset_th ? "；同期资产端扩表" + str.tostring(v71_asset_chg, "#.#") + "B，已排除缩表" : "；同期资产端持平(" + f_sign_b(v71_asset_chg) + "B)，已排除缩表"))
+    string v71_asset_note = not v71_asset_ok ? "" : (v71_asset_chg < -v71_asset_th ? "；资产端同期收缩" + f_amt_abs(v71_asset_chg) + "，但覆盖不了残差，剩余仍归其他负债项" : (v71_asset_chg > v71_asset_th ? "；同期资产端扩表" + f_amt(v71_asset_chg) + "，已排除缩表" : "；同期资产端持平(" + f_amt(v71_asset_chg) + ")，已排除缩表"))
     // 【V82】残差归因方向化辅助量：负残差有两种相反成因(TGA抽水未闭合 / TGA放水未落地)，需先算清再分派文案
     float v82_uncover_pos = math.max(v67_debt_uncover, 0.0)                                                                                          // TGA 增量中真未被 RRP 承接的部分(此前直接输出负值，与"属净发债抽水"语义冲突)
     float v82_unlanded    = math.max(v71_asset_ok ? v71_asset_chg - v62_ident_resid : math.abs(v62_ident_resid), 0.0)                                  // 放水未落地时被 Fed 其他负债项/流通现金吸收的量 = |资产端Δ − 残差|
@@ -891,23 +944,27 @@ if barstate.islast or barstate.isrealtime
     if v67_res_stale and not v71_qt_hit
         v67_resid_attrib := "准备金周度序列(WRESBAL)近" + str.tostring(v67_stale_look) + "根bar未刷新，残差属H.4.1更新时点错配的假信号，先核对数据源再采信本条"
     else if v71_qt_hit
-        v67_resid_attrib := "资产端校验命中：Fed总资产(WALCL)近" + str.tostring(v71_asset_look) + "bar收缩" + str.tostring(math.abs(v71_asset_chg), "#.#") + "B，规模足以覆盖残差" + str.tostring(math.abs(v62_ident_resid), "#.#") + "B，准备金流失主因是缩表(QT)到期不续买，而非Fed其他负债项异常"
+        v67_resid_attrib := "资产端校验命中：Fed总资产(WALCL)近" + str.tostring(v71_asset_look) + "bar收缩" + f_amt_abs(v71_asset_chg) + "，规模足以覆盖残差" + f_amt_abs(v62_ident_resid) + "，准备金流失主因是缩表(QT)到期不续买，而非Fed其他负债项异常"
     else if v62_ident_resid < 0 and v62_tga_chg < 0
-        v67_resid_attrib := "TGA释放" + str.tostring(math.abs(v62_tga_chg), "#.#") + "B(财政净投放、方向为放水)，但准备金未同步增加(实际" + (v62_res_chg >= 0 ? "减" : "增") + str.tostring(math.abs(v62_res_chg), "#.#") + "B)，缺口" + str.tostring(v82_unlanded, "#.#") + "B归Fed其他负债项扩张(财政预付款/其他存款/外国官方非回购池)吸收，属财政投放未落地、钱停在美联储账上没进银行体系，账面净放水不可当真实注入采信" + v71_asset_note
+        v67_resid_attrib := "TGA释放" + f_amt_abs(v62_tga_chg) + "(财政净投放、方向为放水)，但准备金未同步增加(实际" + (v62_res_chg >= 0 ? "减" : "增") + f_amt_abs(v62_res_chg) + ")，缺口" + f_amt(v82_unlanded) + "归Fed其他负债项扩张(财政预付款/其他存款/外国官方非回购池)吸收，属财政投放未落地、钱停在美联储账上没进银行体系，账面净放水不可当真实注入采信" + v71_asset_note
     else if v62_ident_resid < 0 and v67_tax_window
-        v67_resid_attrib := "正处缴税窗口(" + str.tostring(month) + "月" + str.tostring(dayofmonth) + "日)，TGA抽走" + str.tostring(math.abs(v62_tga_chg), "#.#") + "B中RRP仅承接" + str.tostring(v67_rrp_take, "#.#") + "B，未被承接的" + str.tostring(v82_uncover_pos, "#.#") + "B属税款划转与准备金周均值时点错配" + v71_asset_note
+        v67_resid_attrib := "正处缴税窗口(" + str.tostring(month) + "月" + str.tostring(dayofmonth) + "日)，TGA抽走" + f_amt_abs(v62_tga_chg) + "中RRP仅承接" + f_amt(v67_rrp_take) + "，未被承接的" + f_amt(v82_uncover_pos) + "属税款划转与准备金周均值时点错配" + v71_asset_note
     else if v62_ident_resid < 0
-        v67_resid_attrib := "TGA抽走" + str.tostring(math.abs(v62_tga_chg), "#.#") + "B中RRP仅承接" + str.tostring(v67_rrp_take, "#.#") + "B，未被承接的" + str.tostring(v82_uncover_pos, "#.#") + "B属净发债真实抽水；差额" + str.tostring(math.abs(v62_ident_resid), "#.#") + "B归Fed其他负债项(外国回购池/财政预付款/其他存款)" + v71_asset_note
+        v67_resid_attrib := "TGA抽走" + f_amt_abs(v62_tga_chg) + "中RRP仅承接" + f_amt(v67_rrp_take) + "，未被承接的" + f_amt(v82_uncover_pos) + "属净发债真实抽水；差额" + f_amt_abs(v62_ident_resid) + "归Fed其他负债项(外国回购池/财政预付款/其他存款)" + v71_asset_note
     else
-        v67_resid_attrib := "准备金实际减少量少于三渠道合计，Fed其他负债项反向释放" + str.tostring(math.abs(v62_ident_resid), "#.#") + "B对冲，实际抽水强度需打折" + v71_asset_note
+        v67_resid_attrib := "准备金实际减少量少于三渠道合计，Fed其他负债项反向释放" + f_amt_abs(v62_ident_resid) + "对冲，实际抽水强度需打折" + v71_asset_note
 
-    string v67_attrib_line = (v67_show_attrib and v62_ident_broken) ? " ｜残差归因: " + v67_resid_attrib : ""
+    string v67_attrib_line = (v67_show_attrib and v62_ident_broken and v84_view == "标准") ? " ｜残差归因: " + v67_resid_attrib : ""
 
     // 综合串(看板整行合并时使用)
-    string v62_flow = use_v62 ? "🩸买方: " + v62_demand_str + " ｜ 卖方: " + v62_supply_str + v67_attrib_line : "V66 未启用"
+    string v62_flow = use_v62 ? "买方: " + v62_demand_str + " ｜ 卖方: " + v62_supply_str + v67_attrib_line : "V66 未启用"
 
     // 【V75】换行计算从全局作用域移入本块(仅末根 bar 执行)
-    string v62_flow_wrapped = f_auto_wrap(v62_flow, v69_w_flow)
+    string v84_kf = v62_flow + "|" + str.tostring(v69_w_flow) + "|" + str.tostring(v72_width_aware)
+    if v84_kf != v84_k_flow
+        v84_v_flow := f_auto_wrap(v62_flow, v69_w_flow)
+        v84_k_flow := v84_kf
+    string v62_flow_wrapped = v84_v_flow
     string bg_desc = ""
     if is_extreme_tight
         bg_desc += "⚠LSI极端紧张"
@@ -982,7 +1039,14 @@ if barstate.islast or barstate.isrealtime
         bg_desc += " | ⚠曲线熊陡(杀估值)"
 
     string macro_state_text = state_blackhole ? "⭐【宏观状态】流动性黑洞" : state_stagflation ? "⭐【宏观状态】滞胀式危机" : is_bull_steepener ? "🚨【宏观状态】衰退前兆(极速牛陡)" : is_bear_steepener ? "🚨【宏观状态】长端崩盘(极速熊陡)" : state_supernova ? "⭐【宏观状态】流动性泛滥" : state_gold_regime ? "⭐【宏观状态】范式转换" : "⭐【宏观状态】风平浪静"
-    string final_text = f_auto_wrap(macro_state_text + "  ➔  " + bg_desc, v72_w_state)
+    // 【V84 B3】非日线防呆：本看板的环比/分位/流向全部按"D"口径拉取，非日线周期下读数会失真
+    string v84_tf_warn = timeframe.isdaily ? "" : ("⚠当前周期 " + timeframe.period + " 非日线，日度环比与分位读数失真；")
+    string v84_state_raw = v84_tf_warn + macro_state_text + "  ➔  " + bg_desc
+    string v84_ks = v84_state_raw + "|" + str.tostring(v72_w_state) + "|" + str.tostring(v72_width_aware)
+    if v84_ks != v84_k_state
+        v84_v_state := f_auto_wrap(v84_state_raw, v72_w_state)
+        v84_k_state := v84_ks
+    string final_text = v84_v_state
     
     real_rate_val = dfii10 / 100
     credit_val = credit_spread / 100
@@ -997,19 +1061,22 @@ if barstate.islast or barstate.isrealtime
     //   常开会让行4 宏观状态长期橙色、告警色失去区分度。现默认不计入，只保留开关。
     bool urgent_alert = is_liquidity_break or crisis_signal or (v75_rrp_alert and is_rrp_exhausted) or is_sudden_drain or is_gold_top or is_impulse_waning or is_gli_tight or is_reserve_insufficient or is_gold_top_macro or is_s5th_weak_condition or is_s5th_severe or (is_dxy_strong and use_dxy) or is_credit_spiking or is_bull_steepener or is_bear_steepener or v62_net_drain_on or v62_ident_broken
 
+    // 【V84 B2】行4 底色按严重度分档：黑天鹅级(黑洞/断裂/危机) 红、一般告警 橙、常态 透明
+    color v84_sev_bg = (state_blackhole or is_liquidity_break or crisis_signal) ? color.new(color.red, 78) : urgent_alert ? color.new(color.orange, 82) : na
+
     // === 【V61 增强版】AI 四维全景合成引擎（消除 else-if 盲区掩盖，实现主象限 + 多因子叠加实时定量归因） ===
     // 0. 资金动态与净流向定量穿透
     // 【V66 重构】原「极值法」(max_drain/min_inject) 会把同一笔负债端内部搬家(TGA 涨 + RRP 降)
     // 同时报成"密集抽水"与"放水对冲"，自相矛盾，与 V64 起已落地的三渠道净抽水口径冲突。
     // 故默认改用恒等式口径；V57 旧口径仅保留为 use_v62 关闭时的完整回退分支(交叉验证串已于 V70 移除)。
     float net_flow_b = delta_tga_b + delta_wlrr_b + delta_rrp_b
-    string net_flow_desc = net_flow_b > flow_threshold ? "三渠道合计净抽水(-$" + str.tostring(net_flow_b, "#.##") + "B)，基础货币池边际承压。" : net_flow_b < -flow_threshold ? "三渠道合计净放水(+$" + str.tostring(math.abs(net_flow_b), "#.##") + "B)，短期资金面获得实打实的流动性注入。" : "三渠道净流量基本平衡(净变动$" + str.tostring(net_flow_b, "#.##") + "B)。"
-    string flow_legacy = "🔍【资金动态】" + (max_drain > flow_threshold ? "监测到" + drain_name + "正在密集抽水(-$" + str.tostring(max_drain, "#.##") + "B)，属于" + (drain_name == "国内逆回购" ? "货币基金资金回流逆回购池的内部腾挪；" : "财政发债/收税或外资清算导致的外部失血；") : "近期系统性抽水动能微弱；") + (min_inject < -flow_threshold ? "同时" + inject_name + "正在通过放水(+$" + str.tostring(math.abs(min_inject), "#.##") + "B)对冲市场压力；" : "且缺乏显著的单点放水对冲；") + net_flow_desc
+    string net_flow_desc = net_flow_b > flow_threshold ? "三渠道合计净抽水(-$" + f_amt(net_flow_b) + ")，基础货币池边际承压。" : net_flow_b < -flow_threshold ? "三渠道合计净放水(+$" + f_amt_abs(net_flow_b) + ")，短期资金面获得实打实的流动性注入。" : "三渠道净流量基本平衡(净变动$" + f_amt(net_flow_b) + ")。"
+    string flow_legacy = "🔍【资金动态】" + (max_drain > flow_threshold ? "监测到" + drain_name + "正在密集抽水(-$" + f_amt(max_drain) + ")，属于" + (drain_name == "国内逆回购" ? "货币基金资金回流逆回购池的内部腾挪；" : "财政发债/收税或外资清算导致的外部失血；") : "近期系统性抽水动能微弱；") + (min_inject < -flow_threshold ? "同时" + inject_name + "正在通过放水(+$" + f_amt_abs(min_inject) + ")对冲市场压力；" : "且缺乏显著的单点放水对冲；") + net_flow_desc
     // 【V69 D方案】原串把 v62_supply_str 全量(TGA/RRP/现金/准备金/残差数值)再拼一次，与看板行3逐字重复，
     // 且超容忍时又追加一整句 Fed 负债项解释。现将原始数值统一留在看板行3(数据区)，
     // AI 段只保留"谁在抽、抽了多少、口径是否闭合"三层结论，不复述明细、不重复归因。
     // 【V82】净放水后不再贴带符号数值(此前出现"净放水-30.8B")；并区分"放水落地"与"账面放水未落地"两种相反成因
-    string flow_v66 = "🩸【资金去向】买方: " + v62_demand_str + "；" + (v62_net_drain_on ? "卖方三渠道净抽水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，基础货币池被真实压缩，短端资金价格易上行。" : v62_net_drain < -v62_net_drain_th ? "卖方三渠道净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B，" + (v62_ident_resid < 0 and v62_tga_chg < 0 ? "但准备金未增反降，财政投放被Fed其他负债项吸收，注入未真正落地银行体系。" : "短端资金面获得真实注入。") : "卖方三渠道基本平衡，" + (v62_net_drain >= 0 ? "净抽" : "净放") + str.tostring(math.abs(v62_net_drain), "#.#") + "B，未达抽放水阈值，由存量资金博弈主导。") + (v62_tga_offset ? "TGA 增量由 RRP 搬家承接，非真实抽水。" : "") + (v62_ident_broken ? " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + str.tostring(math.abs(v62_ident_resid), "#.#") + "B 超容忍，" + (v71_qt_hit ? "已核实由资产端缩表(WALCL)造成，三渠道口径本身有效。" : "三渠道口径不闭合，归因见看板。") : " 残差在容忍内，三渠道口径闭合。")
+    string flow_v66 = "🩸【资金去向】买方: " + v62_demand_str + "；" + (v62_net_drain_on ? "卖方三渠道净抽水" + f_amt_abs(v62_net_drain) + "，基础货币池被真实压缩，短端资金价格易上行。" : v62_net_drain < -v62_net_drain_th ? "卖方三渠道净放水" + f_amt_abs(v62_net_drain) + "，" + (v62_ident_resid < 0 and v62_tga_chg < 0 ? "但准备金未增反降，财政投放被Fed其他负债项吸收，注入未真正落地银行体系。" : "短端资金面获得真实注入。") : "卖方三渠道基本平衡，" + (v62_net_drain >= 0 ? "净抽" : "净放") + f_amt_abs(v62_net_drain) + "，未达抽放水阈值，由存量资金博弈主导。") + (v62_tga_offset ? "TGA 增量由 RRP 搬家承接，非真实抽水。" : "") + (v62_ident_broken ? " ⚠残差" + f_resid_txt(v62_ident_resid, v62_net_drain) + f_amt_abs(v62_ident_resid) + " 超容忍，" + (v71_qt_hit ? "已核实由资产端缩表(WALCL)造成，三渠道口径本身有效。" : "三渠道口径不闭合，归因见看板。") : " 残差在容忍内，三渠道口径闭合。")
     string flow_analysis_raw = use_v62 ? flow_v66 : flow_legacy
 
     // 1. 一阶宏观周期与债务周期（主周期定性 + 实际利率/通胀偏差/强美元/贵金属周期叠加）
@@ -1032,16 +1099,16 @@ if barstate.islast or barstate.isrealtime
     // 【V66 新增】一阶补入财政-货基-短债闭环定性：债务周期视角下，发债是否抽走准备金取决于 RRP 缓冲垫是否还在，
     // 这是区分"财政真抽水"与"负债端内部搬家"的宏观层判断，必须在最上游定性，否则下游全会误读。
     if use_v62 and (v62_net_drain_on or v62_tga_offset or v62_rrp_back or v62_net_drain < -v62_net_drain_th)
-        l1_addons += (v62_tga_offset ? " [财政-货基-短债闭环] TGA 增加" + str.tostring(v62_tga_chg, "#.#") + "B 与 RRP 释放" + str.tostring(math.abs(v62_rrp_chg), "#.#") + "B 大体对冲，属财政发债回吐负债端的内部搬家，准备金未被真实抽走，不构成货币收缩，对风险资产的压制被高估；" : v62_net_drain_on ? " [财政真抽水] 三渠道合计抽走" + str.tostring(v62_net_drain, "#.#") + "B 且未见 RRP 缓冲垫对冲，直接消耗银行准备金，属真实的货币消灭，是债务周期后段最典型的流动性逆风；" : v62_net_drain < -v62_net_drain_th and v62_tga_chg < 0 and v62_ident_resid < 0 ? " [财政投放未落地] TGA 释放" + str.tostring(math.abs(v62_tga_chg), "#.#") + "B 本应给银行体系补水，但准备金未同步增加、恒等式残差" + str.tostring(v62_ident_resid, "#.#") + "B，说明这笔钱被 Fed 其他负债项(财政预付款/其他存款等)吸收，账面净放水" + str.tostring(math.abs(v62_net_drain), "#.#") + "B 属名义宽松，未转化为可投放资金，勿按真实注水给风险资产定价；" : v62_rrp_back ? " [缓冲垫回填] RRP 反向增加" + str.tostring(v62_rrp_chg, "#.#") + "B，资金从银行体系回流美联储负债端，短端投放能力被削弱，缓冲垫变薄意味着后续抗冲击空间收窄；" : "")
+        l1_addons += (v62_tga_offset ? " [财政-货基-短债闭环] TGA 增加" + f_amt(v62_tga_chg) + " 与 RRP 释放" + f_amt_abs(v62_rrp_chg) + " 大体对冲，属财政发债回吐负债端的内部搬家，准备金未被真实抽走，不构成货币收缩，对风险资产的压制被高估；" : v62_net_drain_on ? " [财政真抽水] 三渠道合计抽走" + f_amt(v62_net_drain) + " 且未见 RRP 缓冲垫对冲，直接消耗银行准备金，属真实的货币消灭，是债务周期后段最典型的流动性逆风；" : v62_net_drain < -v62_net_drain_th and v62_tga_chg < 0 and v62_ident_resid < 0 ? " [财政投放未落地] TGA 释放" + f_amt_abs(v62_tga_chg) + " 本应给银行体系补水，但准备金未同步增加、恒等式残差" + f_amt(v62_ident_resid) + "，说明这笔钱被 Fed 其他负债项(财政预付款/其他存款等)吸收，账面净放水" + f_amt_abs(v62_net_drain) + " 属名义宽松，未转化为可投放资金，勿按真实注水给风险资产定价；" : v62_rrp_back ? " [缓冲垫回填] RRP 反向增加" + f_amt(v62_rrp_chg) + "，资金从银行体系回流美联储负债端，短端投放能力被削弱，缓冲垫变薄意味着后续抗冲击空间收窄；" : "")
     if l1_addons == "" and not (state_blackhole or state_stagflation or is_stagflation_risk or state_supernova or state_gold_regime)
         l1_addons := " 实际利率、汇率与通胀预期均处于温和区间，投资主线回归企业盈利与CAPE内在价值中枢。"
     string ai_level_1_raw = "【一阶宏观周期与债务周期】" + l1_base + l1_addons
 
     // 2. 二阶流动性矩阵与底层水位（全球总量 + 美元内部管道 LSI + 缓冲垫 RRP + 银行准备金 + 冲量加速度）
-    string l2_base = is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂(LSI达" + str.tostring(lsi, "#.#") + "BP)，隔夜逆回购(RRP仅剩" + (rrp_data_ok ? rrp_bal_txt : "数据缺失") + ")彻底耗尽，准备金失去缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠总量收缩：全球主要央行处于实质性去杠杆周期(GLI=" + str.tostring(total_liq, "#.##") + "T处于近" + str.tostring(gli_lookback) + "日低位分位)，宏观水位退潮将压制权益市场估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于中性平衡带，资本市场由结构性摩擦和存量资金博弈主导。"
+    string l2_base = is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂(LSI达" + f_amt(lsi) + "P)，隔夜逆回购(RRP仅剩" + (rrp_data_ok ? rrp_bal_txt : "数据缺失") + ")彻底耗尽，准备金失去缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠总量收缩：全球主要央行处于实质性去杠杆周期(GLI=" + str.tostring(total_liq, "#.##") + "T处于近" + str.tostring(gli_lookback) + "日低位分位)，宏观水位退潮将压制权益市场估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于中性平衡带，资本市场由结构性摩擦和存量资金博弈主导。"
     // 【V75 修复 P0-2】LSI 数据缺失时不再输出虚高数值与错误定性，改为显式 N/A 说明
     string l2_lsi_verdict = is_extreme_tight ? "极端紧张，回购市场显著缺钱" : is_tight ? "偏紧，短端资金摩擦升温" : is_extreme_loose ? "极端宽松，内外双松共振" : is_normal_loose ? "正常宽松，货币市场拆借顺畅" : "中性平衡"
-    string l2_pipes = " [内部管道与缓冲垫] " + (lsi_data_ok ? "LSI内部压力为" + str.tostring(lsi, "#.#") + "BP(" + l2_lsi_verdict + ")" : "LSI 数据缺失(SOFR/RRP/EFFR/IORB 至少一项取不到值)，内部压力暂不判定") + "；"
+    string l2_pipes = " [内部管道与缓冲垫] " + (lsi_data_ok ? "LSI内部压力为" + f_amt(lsi) + "P(" + l2_lsi_verdict + ")" : "LSI 数据缺失(SOFR/RRP/EFFR/IORB 至少一项取不到值)，内部压力暂不判定") + "；"
     if is_rrp_exhausted and rrp_data_ok and not is_liquidity_break
         l2_pipes += "⚠注意：虽LSI暂未突破断裂阈值，但RRP逆回购余额已枯竭至" + rrp_bal_txt + "(峰值占比" + str.tostring(rrp_pct, "#.###") + "%)，财政抽水将直接消耗商业银行准备金(" + str.tostring(reserves_trillion, "#.##") + "T)；"
     if is_reserve_insufficient
@@ -1060,16 +1127,16 @@ if barstate.islast or barstate.isrealtime
         l2_pipes += " [短端结构] " + (v62_tga_offset ? "TGA 增量由 RRP 搬家承接，属负债端内部腾挪，对银行准备金中性，勿误判为流动性收缩；" : v62_net_drain_on ? "三渠道同步抽水且无对冲，准备金被真实消耗，属货币消灭而非搬家；" : v62_net_drain < -v62_net_drain_th ? (v62_ident_resid < 0 and v62_tga_chg < 0 ? "三渠道账面净放水，但准备金未增反降，投放被Fed其他负债项吸收，属名义放水而非实际注水；" : "三渠道净放水，准备金获真实补充，短端安全垫加厚；") : "未达抽放水阈值，短端处于存量博弈状态；")
     // 【V71】资产端缩表归因并入二阶(存量水位层)：缩表是负债端三渠道之外的准备金流失渠道
     if v71_qt_hit
-        l2_pipes += " [资产端收缩] Fed总资产(WALCL)近" + str.tostring(v71_asset_look) + "bar减少" + str.tostring(math.abs(v71_asset_chg), "#.#") + "B，缩表与三渠道抽水叠加消耗准备金，该部分不可逆；"
+        l2_pipes += " [资产端收缩] Fed总资产(WALCL)近" + str.tostring(v71_asset_look) + "bar减少" + f_amt_abs(v71_asset_chg) + "，缩表与三渠道抽水叠加消耗准备金，该部分不可逆；"
     string ai_level_2_raw = "【二阶流动性矩阵与底层水位】" + l2_base + l2_pipes
 
     // 3. 三阶微观定价与风险溢价（美债曲线结构 + 信用利差高度与动量 + S5TH 市场广度与抄底/过热）
-    string l3_curve = is_bull_steepener ? "🚨【牛陡/衰退预警】短端2Y美债周期内暴跌(" + str.tostring(us02y_change, "#.#") + "BP)，10Y-2Y利差迅速走阔(+" + str.tostring(spread_change, "#.#") + "BP)，市场正恐慌性抢跑美联储紧急降息与经济硬着陆，立即转向现金与短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端10Y美债失控飙升(+" + str.tostring(us10y_change, "#.#") + "BP)，期限溢价爆表，高估值科技股与长久期资产面临折现率上行带来的惨烈杀估值！" : yield_spread < -50 ? "⚠【深度倒挂】10Y-2Y利差深度倒挂(" + str.tostring(yield_spread, "#.#") + "BP)，隐含中长期衰退引力，切忌在周期顶部过度加杠杆；" : yield_spread < 0 ? "🟡【浅度倒挂】10Y-2Y利差处于" + str.tostring(yield_spread, "#.#") + "BP浅度倒挂区间，观察向正斜率修复的路径(牛陡或熊陡)；" : "🟢【正斜率】10Y-2Y利差为+" + str.tostring(yield_spread, "#.#") + "BP平稳正斜率，期限结构常态化；"
+    string l3_curve = is_bull_steepener ? "🚨【牛陡/衰退预警】短端2Y美债周期内暴跌(" + f_amt(us02y_change) + "P)，10Y-2Y利差迅速走阔(+" + f_amt(spread_change) + "P)，市场正恐慌性抢跑美联储紧急降息与经济硬着陆，立即转向现金与短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端10Y美债失控飙升(+" + f_amt(us10y_change) + "P)，期限溢价爆表，高估值科技股与长久期资产面临折现率上行带来的惨烈杀估值！" : yield_spread < -50 ? "⚠【深度倒挂】10Y-2Y利差深度倒挂(" + f_amt(yield_spread) + "P)，隐含中长期衰退引力，切忌在周期顶部过度加杠杆；" : yield_spread < 0 ? "🟡【浅度倒挂】10Y-2Y利差处于" + f_amt(yield_spread) + "P浅度倒挂区间，观察向正斜率修复的路径(牛陡或熊陡)；" : "🟢【正斜率】10Y-2Y利差为+" + f_amt(yield_spread) + "P平稳正斜率，期限结构常态化；"
     string l3_credit = crisis_signal ? " 🔥【危机传导打通】短端利率与通胀预期高度收敛叠加高收益债信用利差破位(" + str.tostring(credit_val, "#.##") + "% > " + str.tostring(credit_th/100.0, "#.##") + "%)，违约风险正在冲击权益定价，切勿逆势接飞刀！" : (credit_spread > credit_th and is_credit_spiking) ? " ⚠【信用双警】垃圾债利差不仅绝对水位过宽(" + str.tostring(credit_val, "#.##") + "%)，且短期ROC动量急升(+" + str.tostring(credit_spread_roc, "#.#") + "%)，企业再融资环境急速恶化！" : credit_spread > credit_th ? " ⚠【信用利差过宽】高收益债利差达" + str.tostring(credit_val, "#.##") + "%(高于" + str.tostring(credit_th/100.0, "#.#") + "%警戒线)，脆弱资产违约溢价偏高；" : is_credit_spiking ? " ⚠【信用动量飙升】虽绝对利差(" + str.tostring(credit_val, "#.##") + "%)尚在阈值内，但近" + str.tostring(credit_roc_len) + "日ROC急升+" + str.tostring(credit_spread_roc, "#.#") + "%，聪明钱在债券市场开始定价风险！" : " [信用温和] 高收益债利差(" + str.tostring(credit_val, "#.##") + "%)处于安全水位，未见系统性违约挤兑；"
     string l3_breadth = is_s5th_bottom ? " 🟢【极端底部信号】标普500站上200日均线占比(S5TH=" + str.tostring(s5th_raw, "#.#") + "%)跌破" + str.tostring(s5th_bottom_th, "#.#") + "%历史冰点，恐慌盘彻底出清，中长线左侧赔率极佳！" : is_s5th_severe ? " 🩸【广度严重崩坏】S5TH广度跌至" + str.tostring(s5th_raw, "#.#") + "%(<" + str.tostring(s5th_severe_th, "#.#") + "%)，多数成分股跌破年线，指数内部处于空头主导，严控仓位、规避高波动题材！" : is_s5th_weak_condition ? " 📉【广度弱化+均线死叉】S5TH(" + str.tostring(s5th_raw, "#.#") + "%)呈现5/20/50日均线空头排列，市场赚钱效应收敛，宜去弱留强、向高安全边际价值股靠拢。" : is_s5th_overheat ? " 🔥【广度过热预警】S5TH高达" + str.tostring(s5th_raw, "#.#") + "%(≥" + str.tostring(s5th_overheat_th, "#.#") + "%)，市场情绪极度拥挤，谨防获利盘集中兑现引发的技术性回调。" : " 📈【广度健康】S5TH为" + str.tostring(s5th_raw, "#.#") + "%，微观交易结构稳健，可耐心持有具备业绩支撑的核心标的。"
     // 【V66 新增】三阶补入短端一级市场定价(Bill-OIS)：V64 起资金去向结构改为三渠道恒等式后，
     // 3M T-Bill 相对 SOFR 的溢价/折价才是"微观定价层"里对短债供需最直接的报价证据，与二阶的水位判定形成闭环。
-    string l3_bill = not use_v62 ? "" : na(v62_bill_ois) ? " [短端定价] 3M T-Bill 相对 SOFR 数据缺失，短债供需无法定量判定；" : v62_bill_hot ? " 🎯【短端定价扭曲】3M T-Bill 收益率低于 SOFR " + str.tostring(math.abs(v62_bill_ois), "#.#") + "BP(Bill-OIS 深度负溢价)，一级市场短债被抢筹至溢价成交，货基正用现金替财政融资，属" + (v62_net_drain_on ? "抽水行情下的被动承接，短端收益率被人为压低；" : v62_net_drain < -v62_net_drain_th ? "放水行情下货基仍抢短债，说明资金停在短端、未外溢至风险资产；" : "典型的避险资金涌入短端，风险资产相对吸引力下降；") : v62_bill_ois > 20 ? " ⚠【短端供给压力】3M T-Bill 高于 SOFR " + str.tostring(v62_bill_ois, "#.#") + "BP，一级市场短债供给堆积、须抬高收益率才能出清，财政融资正在分流短端资金；" : " [短端定价常态] Bill-OIS 为" + str.tostring(v62_bill_ois, "#.#") + "BP，短债一级市场供需未见极端挤压；"
+    string l3_bill = not use_v62 ? "" : na(v62_bill_ois) ? " [短端定价] 3M T-Bill 相对 SOFR 数据缺失，短债供需无法定量判定；" : v62_bill_hot ? " 🎯【短端定价扭曲】3M T-Bill 收益率低于 SOFR " + f_amt_abs(v62_bill_ois) + "P(Bill-OIS 深度负溢价)，一级市场短债被抢筹至溢价成交，货基正用现金替财政融资，属" + (v62_net_drain_on ? "抽水行情下的被动承接，短端收益率被人为压低；" : v62_net_drain < -v62_net_drain_th ? "放水行情下货基仍抢短债，说明资金停在短端、未外溢至风险资产；" : "典型的避险资金涌入短端，风险资产相对吸引力下降；") : v62_bill_ois > 20 ? " ⚠【短端供给压力】3M T-Bill 高于 SOFR " + f_amt(v62_bill_ois) + "P，一级市场短债供给堆积、须抬高收益率才能出清，财政融资正在分流短端资金；" : " [短端定价常态] Bill-OIS 为" + f_amt(v62_bill_ois) + "P，短债一级市场供需未见极端挤压；"
     string ai_level_3_raw = "【三阶微观定价与风险溢价】" + l3_curve + l3_credit + l3_breadth + l3_bill
     
     // 【V73-B方案】四段合流：原实现四段各自独立 f_auto_wrap，每段末行必然不满一行(4 处段尾留白)，
@@ -1078,50 +1145,56 @@ if barstate.islast or barstate.isrealtime
     // "｜" 属分隔符集，断行优先落在段标签前，段首视觉上仍整齐。
     // v73_ai_stream=false 时完整回退 V72 的四段独立换行 + 段间空行。
     string ai_stream_raw = flow_analysis_raw + " ｜ " + ai_level_1_raw + " ｜ " + ai_level_2_raw + " ｜ " + ai_level_3_raw
+    // 【V84 补丁】AI 长文换行缓存：本篇是最长的 O(n^2) 换行对象，文本/宽度/开关不变即复用上次结果，避免每 tick 重算
+    string v84_ai_key = ai_stream_raw + "|" + str.tostring(v69_w_ai) + "|" + str.tostring(v73_ai_stream) + "|" + str.tostring(v72_width_aware) + "|" + v84_view
     string ai_judgment = ""
-    if v73_ai_stream
-        ai_judgment := f_auto_wrap(ai_stream_raw, v69_w_ai)
+    if v84_view == "极简"
+        ai_judgment := "极简视图：AI 四维分析已折叠(切回「标准」查看)；水位与告警见上方各行。"
+    else if v84_ai_key != v84_k_ai
+        ai_judgment := v73_ai_stream ? f_auto_wrap(ai_stream_raw, v69_w_ai) : (f_auto_wrap(flow_analysis_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_1_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_2_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_3_raw, v69_w_ai))
+        v84_k_ai := v84_ai_key
+        v84_v_ai := ai_judgment
     else
-        ai_judgment := f_auto_wrap(flow_analysis_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_1_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_2_raw, v69_w_ai) + "\n\n" + f_auto_wrap(ai_level_3_raw, v69_w_ai)
+        ai_judgment := v84_v_ai
     
-    table.cell(us_table, 0, 0, "LSI 压力", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 0, 0, "LSI 压力", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="LSI = SOFR/IORB/RRP 合成的内部管道压力指数。>=20bps 偏紧，>=50bps 极端紧张；与 RRP 枯竭叠加时判流动性断裂")
     table.cell(us_table, 1, 0, lsi_data_ok ? str.tostring(lsi, "#.##") + " BP" : "N/A", text_color=not lsi_data_ok ? color.gray : lsi >= threshold_extreme_tight ? color.maroon : lsi >= threshold_tight ? color.red : lsi < 0 ? color.green : #ffffff, text_size=table_size)
-    table.cell(us_table, 2, 0, "GLI / 储备", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
-    table.cell(us_table, 3, 0, str.tostring(total_liq, "#.##") + " / " + (na(reserves_trillion) ? "N/A" : str.tostring(reserves_trillion, "#.##") + "T"), text_color=is_gli_loose ? color.lime : is_gli_tight ? color.rgb(148, 147, 235, 9) : color.white, text_size=table_size)
-    table.cell(us_table, 4, 0, "RRP 余额", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 2, 0, "GLI / 储备", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="GLI = 美联储资产 − TGA − RRP + ECB/PBC/BOJ 折算(万亿美元)；斜杠后为银行准备金 WALCL/1000")
+    table.cell(us_table, 3, 0, (src_core_ok ? str.tostring(total_liq, "#.##") + " / " + (na(reserves_trillion) ? "N/A" : str.tostring(reserves_trillion, "#.##") + "T") : "N/A(源失联)"), text_color=is_gli_loose ? color.lime : is_gli_tight ? color.rgb(148, 147, 235, 9) : color.white, text_size=table_size)
+    table.cell(us_table, 4, 0, "RRP 余额", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="ON RRP 余额(千亿/亿)。低于历史峰值 5% 视为枯竭，银行体系的缓冲垫失效")
     table.cell(us_table, 5, 0, rrp_data_ok ? rrp_bal_txt + " (" + (na(rrp_pct) ? "N/A" : str.tostring(rrp_pct, "#.###") + "%") + ")" : "N/A", text_color=not rrp_data_ok ? color.gray : is_rrp_exhausted ? color.red : color.lime, text_size=table_size)
-    table.cell(us_table, 6, 0, "US02Y/利差", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 6, 0, "US02Y/利差", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="US02Y 与 |US02Y − EFFR| 的绝对差(百分点)，用于判断加息/降息周期是否开启")
     table.cell(us_table, 7, 0, str.tostring(us02y_val, "#.##") + " / " + str.tostring(math.abs(us02y_val - effr_val), "#.##"), text_color = us02y_val > effr_val ? color.red : color.green, text_size = table_size)
 
-    table.cell(us_table, 0, 1, "SOFR/RRP", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 0, 1, "SOFR/RRP", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="SOFR 与 RRP 利率(%)。差为负表示短端资金富余")
     table.cell(us_table, 1, 1, str.tostring(sofr/100, "#.##") + " / " + str.tostring(rrp_rate/100, "#.##"), text_color=(sofr - rrp_rate < 0 ? color.green : sofr - rrp_rate > 20 ? color.red : #ffffff), text_size=table_size)
-    table.cell(us_table, 2, 1, "EFFR/IORB", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 2, 1, "EFFR/IORB", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="EFFR 与 IORB(%)。差 < -5BP 富余，-5~-2BP 由松转紧，> -2BP 紧张")
     table.cell(us_table, 3, 1, str.tostring(effr_val, "#.##") + " / " + str.tostring(iorb/100, "#.##"), text_color=(not lsi_data_ok ? color.gray : effr - iorb < -5 ? color.green : effr - iorb > -2 ? color.red : color.orange), text_size=table_size)
-    table.cell(us_table, 4, 1, "通胀预/实", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 4, 1, "通胀预/实", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="10Y 盈亏平衡通胀 / 10Y 实际利率(%)")
     table.cell(us_table, 5, 1, str.tostring(t10yie_val, "#.##") + "% / " + str.tostring(real_rate_val, "#.##") + "%", text_color=(t10yie_val > th_t10yie or real_rate_val > th_real_tight ? color.red : color.white), text_size=table_size)
-    table.cell(us_table, 6, 1, "信用/通胀", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 6, 1, "信用/通胀", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="高收益债信用利差 / CPI 同比(%)。利差突破 400BP 为警戒线")
   
     table.cell(us_table, 7, 1, str.tostring(credit_val, "#.##") + "%" + credit_roc_str + " / " + str.tostring(inf_yoy_val, "#.##") + "%", text_color=(credit_val > (credit_th/100) or inf_yoy_val > th_inf_yoy or is_credit_spiking ? color.red : color.white), text_size=table_size)
 
     // ---- 行2: 冲量 / 广度 / 曲线斜率预警(V66: 去 10Y-2Y 独立格, 并让 3 格给预警串) ----
-    table.cell(us_table, 0, 2, "流动性冲量", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 0, 2, "流动性冲量", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="GLI 周环比变化的再变化(加速度, %)。连续 3 期回落视为动能衰竭")
     table.cell(us_table, 1, 2, str.tostring(liq_impulse, "#.##") + "%" + (is_impulse_waning ? " ⚠" : ""), text_color = liq_impulse > 0 ? color.lime : color.orange, text_size = table_size)
-    table.cell(us_table, 2, 2, "S5TH 广度", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 2, 2, "S5TH 广度", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="标普500 成分股站上 200 日均线的占比(%)")
     table.cell(us_table, 3, 2, str.tostring(s5th_raw, "#.#") + "%", text_color = is_s5th_severe ? color.red : is_s5th_weak_condition ? color.orange : color.white, text_size=table_size)
     // V66: 10Y-2Y 独立显示格已移除(用户不使用), 利差数值并入曲线预警串, 腾出的宽度给预警文案
-    table.cell(us_table, 4, 2, "曲线/斜率预警", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 4, 2, "曲线/斜率预警", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="10Y-2Y 曲线状态与斜率突变预警(BP)")
     table.merge_cells(us_table, 5, 2, 7, 2)
     table.cell(us_table, 5, 2, curve_status_compact, text_color=curve_status_color, text_size=table_size, text_halign=text.align_left)
 
     // ---- 行3: 资金去向(周) 整行优先权，容纳 V64 短端雷达 ----
     table.merge_cells(us_table, 0, 3, 1, 3)
-    table.cell(us_table, 0, 3, "🩸资金去向(周)", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50))
+    table.cell(us_table, 0, 3, "资金去向(周)", text_color=#ffffff, text_size=table_size, bgcolor=color.new(#333333, 50), tooltip="三渠道(TGA/RRP/外国逆回购)净抽放水 + 准备金增减 + 恒等式残差；正=抽水，负=放水")
     table.merge_cells(us_table, 2, 3, 7, 3)
     table.cell(us_table, 2, 3, v62_flow_wrapped, text_color=v62_flow_color, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
 
     // ---- 行4: 宏观状态 ----
     table.merge_cells(us_table, 0, 4, 7, 4)
-    table.cell(us_table, 0, 4, final_text, text_color = urgent_alert ? color.rgb(255, 140, 0) : color.white, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
+    table.cell(us_table, 0, 4, final_text, text_color = urgent_alert ? color.rgb(255, 140, 0) : color.white, bgcolor = v84_sev_bg, text_size=table_size, text_halign=text.align_left, text_valign=text.align_center)
 
     // ---- 行5: AI 四维 ----
     table.merge_cells(us_table, 0, 5, 7, 5)
