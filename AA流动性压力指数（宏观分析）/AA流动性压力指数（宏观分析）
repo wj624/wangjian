@@ -1,5 +1,13 @@
 //@version=6
-indicator("流动性压力指数", shorttitle="流动性压力84版", overlay=false)
+indicator("流动性压力指数", shorttitle="流动性压力85版", overlay=false)
+
+// === 【V85】量纲显示修复（判定口径/阈值/颜色/结构零改动，只改数值格式化）：
+//   缺陷：利率类数值（LSI、Bill-OIS、10Y-2Y 利差、2Y/10Y 变动）沿用了金额格式化函数 f_amt，
+//         经"×10 + 亿 / ÷10 + 千亿"换算后与 P 单位直接拼接，实际渲染成"347亿P"（真值 34.7bp）、
+//         倒挂时成"-890亿P"，单位与量级双错；金额位（净抽放水/准备金/TGA/RRP/残差/资产端）本身正确，不动。
+//   P1: 新增 f_bp / f_bp_abs（符号 + 数值 + bp，整数不带小数位，非整数 1 位），不参与任何金额换算。
+//   P2: 替换 5 处误用 —— L3 曲线利差格、二阶 LSI(断裂/常态两分支)、三阶 l3_curve(6 个调用点)、
+//       三阶 l3_bill(负溢价/正溢价/常态 3 个调用点)。原"P"后缀与拼接处多余的"+"号一并去掉，避免"++"。
 
 // === 【V84】三批整合（显示层 / 结构 / 健壮性），判定口径与阈值零改动：
 //   批次1 显示层：资金量统一"千亿/亿"（f_amt，替换全部 B 后缀）、看板标签去 emoji（🩸）、
@@ -620,6 +628,19 @@ f_amt(float _v) =>
 f_amt_abs(float _v) =>
     f_amt(math.abs(_v))
 
+// 【V85 P1】利率类数值（bp/P 单位）专用格式化。
+//   缺陷：V84 及更早，883/1108/1111/1134/1139 处把 bp 值传给金额函数 f_amt，
+//   经"×10 + 亿"换算后与 P 单位拼接，输出成"347亿P"（真值 34.7bp），单位与量级双错；
+//   倒挂/利差等负值还会被 f_amt 呈现为"-500亿P"。本函数只做 符号 + 数值 + bp，不参与任何金额换算。
+//   整数不带小数位（如 +89bp），非整数保留 1 位（如 +34.7bp）；na 显式回落 "N/A"，不吐 "NaNbp"。
+f_bp(float _v) =>
+    string _n = na(_v) ? "N/A" : (_v == math.round(_v) ? str.tostring(_v, "#") : str.tostring(_v, "#.#"))
+    na(_v) ? "N/A" : (_v >= 0 ? "+" : "") + _n + "bp"
+
+f_bp_abs(float _v) =>
+    float _a = na(_v) ? 0.0 : math.abs(_v)
+    na(_v) ? "N/A" : ((_a == math.round(_a) ? str.tostring(_a, "#") : str.tostring(_a, "#.#")) + "bp")
+
 // 【V83】三渠道单行文本：正=抽水、负=放水，一律显式写字，避免读者对 ± 做二次翻译
 f_supply_item(string _n, float _v) =>
     float _a = math.abs(_v)
@@ -880,7 +901,7 @@ if barstate.islast or barstate.isrealtime
     // 曲线/斜率预警压缩串: 原独立"利差/曲线/斜率预警"行压缩进第2行, 用两行文本保留完整预警文案(不再只显示"牛陡/熊陡"符号)
     string curve_warn_text = is_bull_steepener ? "⚠衰退/流动性枯竭前兆" : is_bear_steepener ? "⚠长端通胀/结构杀估值" : "无极端结构异动"
     // V66: 移除独立的 10Y-2Y 显示格, 把利差数值直接并入本串, 省出一格宽度让预警文案单行完整显示
-    string curve_status_compact = curve_status_text + " " + f_amt(yield_spread) + "P ｜ " + curve_warn_text
+    string curve_status_compact = curve_status_text + " " + f_bp(yield_spread) + " ｜ " + curve_warn_text
 
     // --- A-4 买方侧(谁在接短债) / 卖方侧(钱被谁抽走) ---
     // ---- 买方侧: 谁在接短债 ----
@@ -1105,10 +1126,10 @@ if barstate.islast or barstate.isrealtime
     string ai_level_1_raw = "【一阶宏观周期与债务周期】" + l1_base + l1_addons
 
     // 2. 二阶流动性矩阵与底层水位（全球总量 + 美元内部管道 LSI + 缓冲垫 RRP + 银行准备金 + 冲量加速度）
-    string l2_base = is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂(LSI达" + f_amt(lsi) + "P)，隔夜逆回购(RRP仅剩" + (rrp_data_ok ? rrp_bal_txt : "数据缺失") + ")彻底耗尽，准备金失去缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠总量收缩：全球主要央行处于实质性去杠杆周期(GLI=" + str.tostring(total_liq, "#.##") + "T处于近" + str.tostring(gli_lookback) + "日低位分位)，宏观水位退潮将压制权益市场估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于中性平衡带，资本市场由结构性摩擦和存量资金博弈主导。"
+    string l2_base = is_liquidity_break ? "🚨底层管道破裂：美元体系核心流动性断裂(LSI达" + f_bp(lsi) + ")，隔夜逆回购(RRP仅剩" + (rrp_data_ok ? rrp_bal_txt : "数据缺失") + ")彻底耗尽，准备金失去缓冲垫，休克危机一触即发！" : is_gli_tight ? "⚠总量收缩：全球主要央行处于实质性去杠杆周期(GLI=" + str.tostring(total_liq, "#.##") + "T处于近" + str.tostring(gli_lookback) + "日低位分位)，宏观水位退潮将压制权益市场估值扩张倍数。" : is_gli_loose ? "🟢总量扩张：全球总流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于历史百分位高点，央行资产负债表扩张为底层水位提供充足托底，流动性溢出效应明显。" : "🟡水位中立：全球宏观流动性(GLI=" + str.tostring(total_liq, "#.##") + "T)处于中性平衡带，资本市场由结构性摩擦和存量资金博弈主导。"
     // 【V75 修复 P0-2】LSI 数据缺失时不再输出虚高数值与错误定性，改为显式 N/A 说明
     string l2_lsi_verdict = is_extreme_tight ? "极端紧张，回购市场显著缺钱" : is_tight ? "偏紧，短端资金摩擦升温" : is_extreme_loose ? "极端宽松，内外双松共振" : is_normal_loose ? "正常宽松，货币市场拆借顺畅" : "中性平衡"
-    string l2_pipes = " [内部管道与缓冲垫] " + (lsi_data_ok ? "LSI内部压力为" + f_amt(lsi) + "P(" + l2_lsi_verdict + ")" : "LSI 数据缺失(SOFR/RRP/EFFR/IORB 至少一项取不到值)，内部压力暂不判定") + "；"
+    string l2_pipes = " [内部管道与缓冲垫] " + (lsi_data_ok ? "LSI内部压力为" + f_bp(lsi) + "(" + l2_lsi_verdict + ")" : "LSI 数据缺失(SOFR/RRP/EFFR/IORB 至少一项取不到值)，内部压力暂不判定") + "；"
     if is_rrp_exhausted and rrp_data_ok and not is_liquidity_break
         l2_pipes += "⚠注意：虽LSI暂未突破断裂阈值，但RRP逆回购余额已枯竭至" + rrp_bal_txt + "(峰值占比" + str.tostring(rrp_pct, "#.###") + "%)，财政抽水将直接消耗商业银行准备金(" + str.tostring(reserves_trillion, "#.##") + "T)；"
     if is_reserve_insufficient
@@ -1131,12 +1152,12 @@ if barstate.islast or barstate.isrealtime
     string ai_level_2_raw = "【二阶流动性矩阵与底层水位】" + l2_base + l2_pipes
 
     // 3. 三阶微观定价与风险溢价（美债曲线结构 + 信用利差高度与动量 + S5TH 市场广度与抄底/过热）
-    string l3_curve = is_bull_steepener ? "🚨【牛陡/衰退预警】短端2Y美债周期内暴跌(" + f_amt(us02y_change) + "P)，10Y-2Y利差迅速走阔(+" + f_amt(spread_change) + "P)，市场正恐慌性抢跑美联储紧急降息与经济硬着陆，立即转向现金与短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端10Y美债失控飙升(+" + f_amt(us10y_change) + "P)，期限溢价爆表，高估值科技股与长久期资产面临折现率上行带来的惨烈杀估值！" : yield_spread < -50 ? "⚠【深度倒挂】10Y-2Y利差深度倒挂(" + f_amt(yield_spread) + "P)，隐含中长期衰退引力，切忌在周期顶部过度加杠杆；" : yield_spread < 0 ? "🟡【浅度倒挂】10Y-2Y利差处于" + f_amt(yield_spread) + "P浅度倒挂区间，观察向正斜率修复的路径(牛陡或熊陡)；" : "🟢【正斜率】10Y-2Y利差为+" + f_amt(yield_spread) + "P平稳正斜率，期限结构常态化；"
+    string l3_curve = is_bull_steepener ? "🚨【牛陡/衰退预警】短端2Y美债周期内暴跌(" + f_bp(us02y_change) + ")，10Y-2Y利差迅速走阔(" + f_bp(spread_change) + ")，市场正恐慌性抢跑美联储紧急降息与经济硬着陆，立即转向现金与短债防御！" : is_bear_steepener ? "🚨【熊陡/杀估值警报】长端10Y美债失控飙升(" + f_bp(us10y_change) + ")，期限溢价爆表，高估值科技股与长久期资产面临折现率上行带来的惨烈杀估值！" : yield_spread < -50 ? "⚠【深度倒挂】10Y-2Y利差深度倒挂(" + f_bp(yield_spread) + ")，隐含中长期衰退引力，切忌在周期顶部过度加杠杆；" : yield_spread < 0 ? "🟡【浅度倒挂】10Y-2Y利差处于" + f_bp(yield_spread) + "浅度倒挂区间，观察向正斜率修复的路径(牛陡或熊陡)；" : "🟢【正斜率】10Y-2Y利差为" + f_bp(yield_spread) + "平稳正斜率，期限结构常态化；"
     string l3_credit = crisis_signal ? " 🔥【危机传导打通】短端利率与通胀预期高度收敛叠加高收益债信用利差破位(" + str.tostring(credit_val, "#.##") + "% > " + str.tostring(credit_th/100.0, "#.##") + "%)，违约风险正在冲击权益定价，切勿逆势接飞刀！" : (credit_spread > credit_th and is_credit_spiking) ? " ⚠【信用双警】垃圾债利差不仅绝对水位过宽(" + str.tostring(credit_val, "#.##") + "%)，且短期ROC动量急升(+" + str.tostring(credit_spread_roc, "#.#") + "%)，企业再融资环境急速恶化！" : credit_spread > credit_th ? " ⚠【信用利差过宽】高收益债利差达" + str.tostring(credit_val, "#.##") + "%(高于" + str.tostring(credit_th/100.0, "#.#") + "%警戒线)，脆弱资产违约溢价偏高；" : is_credit_spiking ? " ⚠【信用动量飙升】虽绝对利差(" + str.tostring(credit_val, "#.##") + "%)尚在阈值内，但近" + str.tostring(credit_roc_len) + "日ROC急升+" + str.tostring(credit_spread_roc, "#.#") + "%，聪明钱在债券市场开始定价风险！" : " [信用温和] 高收益债利差(" + str.tostring(credit_val, "#.##") + "%)处于安全水位，未见系统性违约挤兑；"
     string l3_breadth = is_s5th_bottom ? " 🟢【极端底部信号】标普500站上200日均线占比(S5TH=" + str.tostring(s5th_raw, "#.#") + "%)跌破" + str.tostring(s5th_bottom_th, "#.#") + "%历史冰点，恐慌盘彻底出清，中长线左侧赔率极佳！" : is_s5th_severe ? " 🩸【广度严重崩坏】S5TH广度跌至" + str.tostring(s5th_raw, "#.#") + "%(<" + str.tostring(s5th_severe_th, "#.#") + "%)，多数成分股跌破年线，指数内部处于空头主导，严控仓位、规避高波动题材！" : is_s5th_weak_condition ? " 📉【广度弱化+均线死叉】S5TH(" + str.tostring(s5th_raw, "#.#") + "%)呈现5/20/50日均线空头排列，市场赚钱效应收敛，宜去弱留强、向高安全边际价值股靠拢。" : is_s5th_overheat ? " 🔥【广度过热预警】S5TH高达" + str.tostring(s5th_raw, "#.#") + "%(≥" + str.tostring(s5th_overheat_th, "#.#") + "%)，市场情绪极度拥挤，谨防获利盘集中兑现引发的技术性回调。" : " 📈【广度健康】S5TH为" + str.tostring(s5th_raw, "#.#") + "%，微观交易结构稳健，可耐心持有具备业绩支撑的核心标的。"
     // 【V66 新增】三阶补入短端一级市场定价(Bill-OIS)：V64 起资金去向结构改为三渠道恒等式后，
     // 3M T-Bill 相对 SOFR 的溢价/折价才是"微观定价层"里对短债供需最直接的报价证据，与二阶的水位判定形成闭环。
-    string l3_bill = not use_v62 ? "" : na(v62_bill_ois) ? " [短端定价] 3M T-Bill 相对 SOFR 数据缺失，短债供需无法定量判定；" : v62_bill_hot ? " 🎯【短端定价扭曲】3M T-Bill 收益率低于 SOFR " + f_amt_abs(v62_bill_ois) + "P(Bill-OIS 深度负溢价)，一级市场短债被抢筹至溢价成交，货基正用现金替财政融资，属" + (v62_net_drain_on ? "抽水行情下的被动承接，短端收益率被人为压低；" : v62_net_drain < -v62_net_drain_th ? "放水行情下货基仍抢短债，说明资金停在短端、未外溢至风险资产；" : "典型的避险资金涌入短端，风险资产相对吸引力下降；") : v62_bill_ois > 20 ? " ⚠【短端供给压力】3M T-Bill 高于 SOFR " + f_amt(v62_bill_ois) + "P，一级市场短债供给堆积、须抬高收益率才能出清，财政融资正在分流短端资金；" : " [短端定价常态] Bill-OIS 为" + f_amt(v62_bill_ois) + "P，短债一级市场供需未见极端挤压；"
+    string l3_bill = not use_v62 ? "" : na(v62_bill_ois) ? " [短端定价] 3M T-Bill 相对 SOFR 数据缺失，短债供需无法定量判定；" : v62_bill_hot ? " 🎯【短端定价扭曲】3M T-Bill 收益率低于 SOFR " + f_bp_abs(v62_bill_ois) + "(Bill-OIS 深度负溢价)，一级市场短债被抢筹至溢价成交，货基正用现金替财政融资，属" + (v62_net_drain_on ? "抽水行情下的被动承接，短端收益率被人为压低；" : v62_net_drain < -v62_net_drain_th ? "放水行情下货基仍抢短债，说明资金停在短端、未外溢至风险资产；" : "典型的避险资金涌入短端，风险资产相对吸引力下降；") : v62_bill_ois > 20 ? " ⚠【短端供给压力】3M T-Bill 高于 SOFR " + f_bp(v62_bill_ois) + "，一级市场短债供给堆积、须抬高收益率才能出清，财政融资正在分流短端资金；" : " [短端定价常态] Bill-OIS 为" + f_bp(v62_bill_ois) + "，短债一级市场供需未见极端挤压；"
     string ai_level_3_raw = "【三阶微观定价与风险溢价】" + l3_curve + l3_credit + l3_breadth + l3_bill
     
     // 【V73-B方案】四段合流：原实现四段各自独立 f_auto_wrap，每段末行必然不满一行(4 处段尾留白)，
